@@ -4,10 +4,10 @@ use std::sync::Mutex;
 use sentinel_store::{FileEventStore, EventStore, EventRecord, EventKind};
 use sentinel_core::CanonicalEnvelopeAuthorizationRequest;
 use sha2::Digest;
-use sentinel_identity::{verify_signature, ActorId, KeyId};
+use sentinel_identity::{verify_signature, ActorId, KeyId, load_identity_state_from_event_log, IdentityState};
 use ed25519_dalek::PublicKey;
 // ...existing code...
-use sentinel_identity::{verify_signature, ActorId, KeyId, load_identity_state_from_event_log, IdentityState};
+// ...existing code...
 use uuid::Uuid;
 use chrono::Utc;
 use serde_json::json;
@@ -41,10 +41,20 @@ async fn authz(
     // 1. Envelope presence
     let env = req.into_inner();
 
-    // 2. Signature verification (for demo, public key is derived from actor_id; in real use, lookup)
-    // Here, we simulate a public key for all actors (replace with real lookup in production)
-    let fake_pubkey_bytes = [7u8; 32];
-    let pubkey = PublicKey::from_bytes(&fake_pubkey_bytes).unwrap();
+    // 2. Signature verification (event-sourced, constitutional)
+    let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("identity state load failed: {e}")),
+    };
+    let key_info = identity_state.keys.get(&(env.actor_id, env.key_id));
+    if key_info.is_none() || key_info.unwrap().status != sentinel_identity::KeyStatus::Active {
+        return HttpResponse::Unauthorized().body("unknown or revoked key");
+    }
+    let pubkey_bytes = &key_info.unwrap().public_key;
+    let pubkey = match PublicKey::from_bytes(pubkey_bytes) {
+        Ok(pk) => pk,
+        Err(_) => return HttpResponse::Unauthorized().body("invalid public key bytes"),
+    };
     let sig_result = verify_signature(
         &sentinel_identity::SignedEnvelope {
             actor_id: ActorId(env.actor_id),
@@ -153,7 +163,6 @@ async fn main() {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(store.clone())
-            .app_data(replay.clone())
             .service(health)
             .service(authz)
     })

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod replay_tests;
 use sentinel_store::{FileEventStore, EventStore, EventRecord, EventKind};
 
 /// Load all IdentityEvents from the event log and reduce to current state
