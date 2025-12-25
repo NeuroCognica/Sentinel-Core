@@ -1,0 +1,17 @@
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+.venv/
+python_ui/.venv/
+python_ui/env/
+
+# VS Code
+.vscode/
+*.code-workspace

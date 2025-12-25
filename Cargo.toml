@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "crates/sentinel_core",
+    "crates/sentinel_store",
+    "crates/sentinel_identity",
+    "crates/sentinel_api",
+    "crates/sentinel_cli"
+]
+
+[profile.dev]
+debug = true
+
+[profile.release]
+debug = false

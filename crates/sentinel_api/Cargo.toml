@@ -1,0 +1,12 @@
+[package]
+name = "sentinel_api"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sentinel_api"
+path = "src/main.rs"
+
+[dependencies]
+actix-web = "4"
+tokio = { version = "1", features = ["full"] }
