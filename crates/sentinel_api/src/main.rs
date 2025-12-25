@@ -7,7 +7,7 @@ use sha2::Digest;
 use sentinel_identity::{verify_signature, ActorId, KeyId};
 use ed25519_dalek::PublicKey;
 // ...existing code...
-use std::collections::HashSet;
+use sentinel_identity::{verify_signature, ActorId, KeyId, load_identity_state_from_event_log, IdentityState};
 use uuid::Uuid;
 use chrono::Utc;
 use serde_json::json;
@@ -31,30 +31,11 @@ async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
     }
 }
 
-/// In-memory replay protection: LRU of (actor_id, nonce)
-struct ReplayProtector {
-    seen: Mutex<HashSet<(Uuid, Uuid)>>,
-}
 
-impl ReplayProtector {
-    fn new() -> Self {
-        Self { seen: Mutex::new(HashSet::new()) }
-    }
-    fn check_and_insert(&self, actor_id: Uuid, nonce: Uuid) -> bool {
-        let mut seen = self.seen.lock().unwrap();
-        if seen.contains(&(actor_id, nonce)) {
-            false
-        } else {
-            seen.insert((actor_id, nonce));
-            true
-        }
-    }
-}
 
 #[post("/authz")]
 async fn authz(
     store: web::Data<Mutex<FileEventStore>>,
-    replay: web::Data<ReplayProtector>,
     req: web::Json<CanonicalEnvelopeAuthorizationRequest>,
 ) -> impl Responder {
     // 1. Envelope presence
@@ -89,23 +70,31 @@ async fn authz(
         return HttpResponse::Unauthorized().body("timestamp outside freshness window");
     }
 
-    // 4. Replay protection
-    if !replay.check_and_insert(env.actor_id, env.nonce) {
-        return HttpResponse::Unauthorized().body("replayed nonce");
+
+    // 4. Replay protection (event-sourced)
+    let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("identity state load failed: {e}")),
+    };
+    if identity_state.used_nonces.iter().any(|(aid, _, n, _)| *aid == env.actor_id && *n == env.nonce) {
+        return HttpResponse::Unauthorized().body("replayed nonce (event-sourced)");
     }
 
     // 5. Log the request digest before decision
     let digest = sha2::Sha256::digest(
         serde_json::to_vec(&env).expect("canonical serialization")
     );
+    let digest_hex = hex::encode(digest);
     let mut store = store.lock().unwrap();
+
+    // 5. Log the request digest before decision
     let event = EventRecord {
         event_id: Uuid::new_v4(),
         timestamp_utc: Utc::now(),
         actor: env.actor_id.to_string(),
         kind: EventKind::AuthorizationRequestReceived,
         payload: json!({
-            "request_hash": hex::encode(digest),
+            "request_hash": digest_hex.clone(),
             "actor_id": env.actor_id.to_string(),
         }),
         prev_hash: None,
@@ -113,6 +102,30 @@ async fn authz(
     };
     if let Err(e) = store.append(event) {
         return HttpResponse::InternalServerError().body(format!("event append failed: {e:?}"));
+    }
+
+    // 6. Append NonceConsumed event
+    let nonce_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: env.actor_id.to_string(),
+        kind: EventKind::AuthorizationRequestReceived, // Optionally define a new EventKind for NonceConsumed
+        payload: json!(
+            serde_json::to_value(sentinel_core::IdentityEvent::NonceConsumed(
+                sentinel_core::NonceConsumed {
+                    actor_id: env.actor_id,
+                    key_id: env.key_id,
+                    nonce: env.nonce,
+                    envelope_digest: digest_hex.clone(),
+                    consumed_at: Utc::now(),
+                }
+            )).expect("nonce event serialization")
+        ),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store.append(nonce_event) {
+        return HttpResponse::InternalServerError().body(format!("nonce event append failed: {e:?}"));
     }
 
     // 6. Deterministic response
@@ -136,7 +149,6 @@ async fn main() {
     };
     let store = web::Data::new(Mutex::new(store));
 
-    let replay = web::Data::new(ReplayProtector::new());
 
     let server = HttpServer::new(move || {
         App::new()
