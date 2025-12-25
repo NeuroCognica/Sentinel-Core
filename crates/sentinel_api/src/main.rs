@@ -1,9 +1,28 @@
-use actix_web::{get, App, HttpServer, Responder};
+use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
 use std::panic;
+use std::sync::Mutex;
+use sentinel_store::{FileEventStore, EventStore, EventRecord, EventKind};
+use uuid::Uuid;
+use chrono::Utc;
+use serde_json::json;
+
 
 #[get("/health")]
-async fn health() -> impl Responder {
-    "ok"
+async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
+    let mut store = store.lock().unwrap();
+    let event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: "system".to_string(),
+        kind: EventKind::HealthCheck,
+        payload: json!({}),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    match store.append(event) {
+        Ok(_) => HttpResponse::Ok().body("ok"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("event append failed: {e:?}")),
+    }
 }
 
 #[actix_web::main]
@@ -14,8 +33,18 @@ async fn main() {
     }));
 
     println!("sentinel_api booting");
-    let server = HttpServer::new(|| {
+    let store = match FileEventStore::open("./sentinel_events.log") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("FATAL: could not open event log: {e:?}");
+            std::process::exit(1);
+        }
+    };
+    let store = web::Data::new(Mutex::new(store));
+
+    let server = HttpServer::new(move || {
         App::new()
+            .app_data(store.clone())
             .service(health)
     })
     .bind(("127.0.0.1", 8080));
