@@ -6,6 +6,14 @@ pub enum IdentityEvent {
     KeyRevoked(KeyRevoked),
     KeyRotated(KeyRotated), // Optional, can be stubbed for now
     NonceConsumed(NonceConsumed),
+    GenesisCompleted(GenesisCompleted),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GenesisCompleted {
+    pub completed_at: DateTime<Utc>,
+    pub admin_actor_id: Uuid,
+    pub admin_key_id: Uuid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
