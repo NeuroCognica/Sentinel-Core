@@ -50,7 +50,7 @@ pub struct IdentityState {
     pub actors: HashMap<Uuid, ActorInfo>,
     pub keys: HashMap<(Uuid, Uuid), KeyInfo>, // (actor_id, key_id)
     pub public_keys: HashSet<Vec<u8>>, // For duplicate detection
-    pub used_nonces: HashSet<(Uuid, Uuid, Uuid)>, // (actor_id, key_id, nonce)
+    pub used_nonces: HashSet<(Uuid, Uuid, Uuid, String)>, // (actor_id, key_id, nonce, envelope_digest)
 }
 
 impl IdentityState {
@@ -124,10 +124,11 @@ impl IdentityState {
                     if !matches!(state.keys.get(&(e.actor_id, e.key_id)).unwrap().status, KeyStatus::Active) {
                         return Err(format!("Nonce for revoked key: actor {} key {}", e.actor_id, e.key_id));
                     }
-                    let nonce_tuple = (e.actor_id, e.key_id, e.nonce);
-                    if state.used_nonces.contains(&nonce_tuple) {
-                        return Err(format!("Nonce reuse detected: actor {} key {} nonce {}", e.actor_id, e.key_id, e.nonce));
+                    // Fail if any NonceConsumed exists for (actor_id, nonce) regardless of key_id (strongest replay protection)
+                    if state.used_nonces.iter().any(|(aid, _, n, _)| *aid == e.actor_id && *n == e.nonce) {
+                        return Err(format!("Nonce reuse detected: actor {} nonce {}", e.actor_id, e.nonce));
                     }
+                    let nonce_tuple = (e.actor_id, e.key_id, e.nonce, e.envelope_digest.clone());
                     state.used_nonces.insert(nonce_tuple);
                 }
             }
