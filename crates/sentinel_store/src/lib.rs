@@ -143,6 +143,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventKind {
     HealthCheck,
+    AuthorizationRequestReceived,
     // Add more event kinds as needed in future steps
 }
 
