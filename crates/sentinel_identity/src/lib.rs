@@ -1,3 +1,25 @@
+use sentinel_store::{FileEventStore, EventStore, EventRecord, EventKind};
+
+/// Load all IdentityEvents from the event log and reduce to current state
+pub fn load_identity_state_from_event_log(event_log_path: &str) -> Result<IdentityState, String> {
+    let store = FileEventStore::open(event_log_path)
+        .map_err(|e| format!("Failed to open event log: {:?}", e))?;
+    let records = store.iter()
+        .map_err(|e| format!("Failed to read event log: {:?}", e))?;
+    let mut events = Vec::new();
+    for rec in records {
+        if let EventKind::AuthorizationRequestReceived = rec.kind {
+            // Not an identity event, skip
+            continue;
+        }
+        // Try to parse as IdentityEvent
+        match serde_json::from_value::<IdentityEvent>(rec.payload) {
+            Ok(ev) => events.push(ev),
+            Err(_) => continue, // Not an identity event, skip
+        }
+    }
+    IdentityState::reduce(events)
+}
 use sentinel_core::{IdentityEvent, ActorRegistered, KeyRegistered, KeyRevoked, KeyRotated, NonceConsumed};
 use std::collections::{HashMap, HashSet};
 
