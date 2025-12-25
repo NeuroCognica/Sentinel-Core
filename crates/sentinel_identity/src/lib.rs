@@ -1,3 +1,118 @@
+use sentinel_core::{IdentityEvent, ActorRegistered, KeyRegistered, KeyRevoked, KeyRotated, NonceConsumed};
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone)]
+pub struct ActorInfo {
+    pub actor_id: Uuid,
+    pub human_handle: Option<String>,
+    pub registered_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyStatus {
+    Active,
+    Revoked,
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyInfo {
+    pub actor_id: Uuid,
+    pub key_id: Uuid,
+    pub public_key: Vec<u8>,
+    pub registered_at: DateTime<Utc>,
+    pub status: KeyStatus,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct IdentityState {
+    pub actors: HashMap<Uuid, ActorInfo>,
+    pub keys: HashMap<(Uuid, Uuid), KeyInfo>, // (actor_id, key_id)
+    pub public_keys: HashSet<Vec<u8>>, // For duplicate detection
+    pub used_nonces: HashSet<(Uuid, Uuid, Uuid)>, // (actor_id, key_id, nonce)
+}
+
+impl IdentityState {
+    pub fn reduce<I: IntoIterator<Item = IdentityEvent>>(events: I) -> Result<Self, String> {
+        let mut state = IdentityState::default();
+        for event in events {
+            match event {
+                IdentityEvent::ActorRegistered(e) => {
+                    if state.actors.contains_key(&e.actor_id) {
+                        return Err(format!("Duplicate actor registration: {}", e.actor_id));
+                    }
+                    state.actors.insert(e.actor_id, ActorInfo {
+                        actor_id: e.actor_id,
+                        human_handle: e.human_handle,
+                        registered_at: e.timestamp_utc,
+                    });
+                }
+                IdentityEvent::KeyRegistered(e) => {
+                    if !state.actors.contains_key(&e.actor_id) {
+                        return Err(format!("Key registered for unknown actor: {}", e.actor_id));
+                    }
+                    if state.keys.contains_key(&(e.actor_id, e.key_id)) {
+                        return Err(format!("Duplicate key registration: actor {} key {}", e.actor_id, e.key_id));
+                    }
+                    if state.public_keys.contains(&e.public_key) {
+                        return Err("Duplicate public key detected".to_string());
+                    }
+                    state.public_keys.insert(e.public_key.clone());
+                    state.keys.insert((e.actor_id, e.key_id), KeyInfo {
+                        actor_id: e.actor_id,
+                        key_id: e.key_id,
+                        public_key: e.public_key,
+                        registered_at: e.timestamp_utc,
+                        status: KeyStatus::Active,
+                    });
+                }
+                IdentityEvent::KeyRevoked(e) => {
+                    let key = state.keys.get_mut(&(e.actor_id, e.key_id)).ok_or_else(|| format!("Revoke unknown key: actor {} key {}", e.actor_id, e.key_id))?;
+                    if key.status == KeyStatus::Revoked {
+                        return Err(format!("Key already revoked: actor {} key {}", e.actor_id, e.key_id));
+                    }
+                    key.status = KeyStatus::Revoked;
+                }
+                IdentityEvent::KeyRotated(e) => {
+                    // Optional: implement strict rotation logic or stub
+                    // For now, treat as revoke old + register new
+                    let old_key = state.keys.get_mut(&(e.actor_id, e.old_key_id)).ok_or_else(|| format!("Rotate unknown old key: actor {} key {}", e.actor_id, e.old_key_id))?;
+                    if old_key.status == KeyStatus::Revoked {
+                        return Err(format!("Old key already revoked in rotation: actor {} key {}", e.actor_id, e.old_key_id));
+                    }
+                    old_key.status = KeyStatus::Revoked;
+                    if state.keys.contains_key(&(e.actor_id, e.new_key_id)) {
+                        return Err(format!("Duplicate new key in rotation: actor {} key {}", e.actor_id, e.new_key_id));
+                    }
+                    if state.public_keys.contains(&e.new_public_key) {
+                        return Err("Duplicate public key in rotation".to_string());
+                    }
+                    state.public_keys.insert(e.new_public_key.clone());
+                    state.keys.insert((e.actor_id, e.new_key_id), KeyInfo {
+                        actor_id: e.actor_id,
+                        key_id: e.new_key_id,
+                        public_key: e.new_public_key,
+                        registered_at: e.timestamp_utc,
+                        status: KeyStatus::Active,
+                    });
+                }
+                IdentityEvent::NonceConsumed(e) => {
+                    if !state.keys.contains_key(&(e.actor_id, e.key_id)) {
+                        return Err(format!("Nonce for unknown key: actor {} key {}", e.actor_id, e.key_id));
+                    }
+                    if !matches!(state.keys.get(&(e.actor_id, e.key_id)).unwrap().status, KeyStatus::Active) {
+                        return Err(format!("Nonce for revoked key: actor {} key {}", e.actor_id, e.key_id));
+                    }
+                    let nonce_tuple = (e.actor_id, e.key_id, e.nonce);
+                    if state.used_nonces.contains(&nonce_tuple) {
+                        return Err(format!("Nonce reuse detected: actor {} key {} nonce {}", e.actor_id, e.key_id, e.nonce));
+                    }
+                    state.used_nonces.insert(nonce_tuple);
+                }
+            }
+        }
+        Ok(state)
+    }
+}
 
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature, Signer, Verifier, SECRET_KEY_LENGTH};
 use rand::rngs::OsRng;
