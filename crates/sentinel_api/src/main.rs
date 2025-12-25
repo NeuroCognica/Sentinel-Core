@@ -1,3 +1,93 @@
+#[post("/genesis")]
+async fn genesis(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<serde_json::Value>,
+) -> impl Responder {
+    // Only allow if GenesisCompleted is not present
+    let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("identity state load failed: {e}")),
+    };
+    let store_guard = store.lock().unwrap();
+    let store_events = match store_guard.iter() {
+        Ok(evts) => evts,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("event log read failed: {e:?}")),
+    };
+    let genesis_exists = store_events.iter().any(|rec| {
+        if let Ok(ev) = serde_json::from_value::<sentinel_core::IdentityEvent>(rec.payload.clone()) {
+            matches!(ev, sentinel_core::IdentityEvent::GenesisCompleted(_))
+        } else { false }
+    });
+    if genesis_exists {
+        return HttpResponse::Forbidden().body("genesis already sealed");
+    }
+    // Accept admin_actor_id, admin_key_id, public_key, human_handle from request
+    let admin_actor_id = req.get("actor_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok());
+    let admin_key_id = req.get("key_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok());
+    let public_key = req.get("public_key").and_then(|v| v.as_str()).and_then(|s| hex::decode(s).ok());
+    let human_handle = req.get("human_handle").and_then(|v| v.as_str()).map(|s| s.to_string());
+    if admin_actor_id.is_none() || admin_key_id.is_none() || public_key.is_none() {
+        return HttpResponse::BadRequest().body("missing actor_id, key_id, or public_key");
+    }
+    let now = Utc::now();
+    let actor_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: now,
+        actor: admin_actor_id.unwrap().to_string(),
+        kind: EventKind::AuthorizationRequestReceived, // Or define a new kind for genesis
+        payload: json!(serde_json::to_value(sentinel_core::IdentityEvent::ActorRegistered(
+            sentinel_core::ActorRegistered {
+                actor_id: admin_actor_id.unwrap(),
+                human_handle: human_handle.clone(),
+                timestamp_utc: now,
+            }
+        )).unwrap()),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    let key_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: now,
+        actor: admin_actor_id.unwrap().to_string(),
+        kind: EventKind::AuthorizationRequestReceived,
+        payload: json!(serde_json::to_value(sentinel_core::IdentityEvent::KeyRegistered(
+            sentinel_core::KeyRegistered {
+                actor_id: admin_actor_id.unwrap(),
+                key_id: admin_key_id.unwrap(),
+                public_key: public_key.unwrap(),
+                timestamp_utc: now,
+            }
+        )).unwrap()),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    let genesis_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: now,
+        actor: admin_actor_id.unwrap().to_string(),
+        kind: EventKind::AuthorizationRequestReceived,
+        payload: json!(serde_json::to_value(sentinel_core::IdentityEvent::GenesisCompleted(
+            sentinel_core::GenesisCompleted {
+                completed_at: now,
+                admin_actor_id: admin_actor_id.unwrap(),
+                admin_key_id: admin_key_id.unwrap(),
+            }
+        )).unwrap()),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    let mut store = store.lock().unwrap();
+    if let Err(e) = store.append(actor_event) {
+        return HttpResponse::InternalServerError().body(format!("actor event append failed: {e:?}"));
+    }
+    if let Err(e) = store.append(key_event) {
+        return HttpResponse::InternalServerError().body(format!("key event append failed: {e:?}"));
+    }
+    if let Err(e) = store.append(genesis_event) {
+        return HttpResponse::InternalServerError().body(format!("genesis event append failed: {e:?}"));
+    }
+    HttpResponse::Ok().json(json!({"result": "genesis completed"}))
+}
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
 use std::panic;
 use std::sync::Mutex;
@@ -160,11 +250,13 @@ async fn main() {
     let store = web::Data::new(Mutex::new(store));
 
 
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(store.clone())
             .service(health)
             .service(authz)
+            .service(genesis)
     })
     .bind(("127.0.0.1", 8080));
 
