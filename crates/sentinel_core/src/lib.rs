@@ -44,7 +44,8 @@ pub struct NonceConsumed {
     pub actor_id: Uuid,
     pub key_id: Uuid,
     pub nonce: Uuid,
-    pub timestamp_utc: DateTime<Utc>,
+    pub envelope_digest: String, // hex-encoded SHA-256 of canonical envelope
+    pub consumed_at: DateTime<Utc>,
 }
 // sentinel_core: types, policy engine interfaces, guard logic, error types
 
