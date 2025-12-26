@@ -1,4 +1,5 @@
 use actix_web::{get, post, web, App, HttpResponse, Responder};
+use actix_web::rt::task::spawn_blocking;
 use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
@@ -313,9 +314,21 @@ pub async fn auth_login(
         return HttpResponse::InternalServerError().body(format!("challenge consume append failed: {e:?}"));
     }
 
+    // release store_guard before calling blocking append to avoid deadlock
+    drop(store_guard);
+
     // 6) Validate + append NonceConsumed via shared middleware (fail-closed)
-    if let Err(e) = middleware::nonce_middleware::check_and_append_nonce(&*store, &envelope) {
-        return HttpResponse::InternalServerError().body(format!("nonce append failed: {e}"));
+    // Offload durable append to blocking thread pool to avoid blocking the async executor (fsync)
+    let store_clone = store.clone();
+    let envelope_clone = envelope.clone();
+    let append_handle = spawn_blocking(move || {
+        middleware::nonce_middleware::check_and_append_nonce(&*store_clone, &envelope_clone)
+    })
+    .await;
+    match append_handle {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return HttpResponse::InternalServerError().body(format!("nonce append failed: {e}")),
+        Err(_) => return HttpResponse::InternalServerError().body("nonce append task failed"),
     }
 
     // 7) Issue session capability (signed by service key)
@@ -353,6 +366,7 @@ pub async fn auth_login(
         prev_hash: None,
         hash: "UNHASHED".to_string(),
     };
+    let mut store_guard = store.lock().unwrap();
     if let Err(e) = store_guard.append(cap_event) {
         return HttpResponse::InternalServerError().body(format!("capability event append failed: {e:?}"));
     }

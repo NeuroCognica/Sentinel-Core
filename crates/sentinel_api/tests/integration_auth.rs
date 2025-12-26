@@ -1,12 +1,14 @@
 use actix_web::{test, App};
+use tempfile::TempDir;
 use serde_json::json;
 
 #[actix_rt::test]
 async fn test_challenge_login_happy_path() {
-    // Ensure a clean event log
-    let _ = std::fs::remove_file("./sentinel_events.log");
+    // Use a per-test temporary directory so relative path "./sentinel_events.log" is isolated
+    let tmpdir = TempDir::new().expect("create temp dir");
+    std::env::set_current_dir(tmpdir.path()).expect("set cwd to temp dir");
 
-    // Create store and app data
+    // Create store and app data using the per-test working directory (./sentinel_events.log)
     let store = sentinel_store::FileEventStore::open("./sentinel_events.log").expect("open store");
     let store_data = actix_web::web::Data::new(std::sync::Mutex::new(store));
 
