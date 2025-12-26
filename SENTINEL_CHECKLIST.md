@@ -430,3 +430,13 @@ This checklist is derived from the full improvement suggestions and is designed 
 ---
 
 **Record progress, commit often, and verify each law and invariant. This checklist is your constitutional roadmap to Sentinel Core production readiness.**
+
+## What To Push (Repository Policy)
+
+- **Canonical-only:** Push files that cannot be downloaded or reliably reconstructed elsewhere: `README.md`, `ARCHITECTURE.md`, `SENTINEL_CHECKLIST.md`, canonical API contract(s) like `openapi.json`, and small, hand-authored docs such as `crates/sentinel_policy/POLICY_EVALUATED.md`.
+- **Source code:** Crate source in `crates/` is normally included; include it if you want a complete clone-to-build repository. If space or sensitivity is a concern, the `PUSH_MANIFEST.md` lists the minimum required set.
+- **Do NOT push:** build artifacts (`target/`), large bench raw outputs, dev/test private keys or credentials, and any generated binaries or Docker images.
+- **Scripts & reproductions:** Small scripts that help reproduce results (e.g. `scripts/run_bench.sh`) are acceptable to push; large artifacts they produce should not be.
+- **Manifest and policy:** Keep `PUSH_MANIFEST.md` at repo root and update it when the policy changes. Use it as the authoritative guide for what is allowed in the online repo.
+
+Follow these rules for all pushes; when in doubt, prefer leaving large generated artifacts out and document reproduction steps instead.
