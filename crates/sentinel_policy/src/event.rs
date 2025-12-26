@@ -21,6 +21,22 @@ pub struct PolicyEvaluated {
     pub evaluator_version: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ConsentDecision {
+    Granted,
+    Denied,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsentEvent {
+    pub actor: String,
+    pub policy_digest: String,
+    pub input_digest: String,
+    pub decision: ConsentDecision,
+    pub reason: String,
+    pub occurred_at_utc: DateTime<Utc>,
+}
+
 /// Construct a PolicyEvaluated event payload from a policy and input.
 /// Pure: performs no IO and does not mutate inputs.
 pub fn make_policy_evaluated(
@@ -81,5 +97,24 @@ pub fn make_policy_evaluated(
         rationale,
         evaluated_at_utc,
         evaluator_version: evaluator_version.to_string(),
+    }
+}
+
+/// Construct a ConsentEvent payload from a policy evaluation and input.
+pub fn make_consent_event(
+    actor: &str,
+    policy_digest: &str,
+    input_digest: &str,
+    granted: bool,
+    reason: &str,
+    occurred_at_utc: DateTime<Utc>,
+) -> ConsentEvent {
+    ConsentEvent {
+        actor: actor.to_string(),
+        policy_digest: policy_digest.to_string(),
+        input_digest: input_digest.to_string(),
+        decision: if granted { ConsentDecision::Granted } else { ConsentDecision::Denied },
+        reason: reason.to_string(),
+        occurred_at_utc,
     }
 }

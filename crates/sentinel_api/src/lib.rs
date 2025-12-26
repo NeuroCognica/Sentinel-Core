@@ -416,23 +416,66 @@ pub async fn auth_login(
         let evaluator_version = "v0";
         let pe = make_policy_evaluated(&policy, &input, evaluator_version, now);
 
-        // 3) Append PolicyEvaluated event BEFORE responding (fail-closed)
-        let mut store_guard = store.lock().unwrap();
+        // 3) Append PolicyEvaluated event BEFORE responding (fail-closed).
+        // Offload durable append to blocking thread pool to avoid executor blocking.
+        let store_clone = store.clone();
+        let pe_clone = pe.clone();
         let event = EventRecord {
             event_id: Uuid::new_v4(),
             timestamp_utc: now,
             actor: "policy_evaluator".to_string(),
             kind: EventKind::PolicyEvaluated,
-            payload: serde_json::to_value(&pe).expect("policy evaluated serialization"),
+            payload: serde_json::to_value(&pe_clone).expect("policy evaluated serialization"),
             prev_hash: None,
             hash: "UNHASHED".to_string(),
         };
 
-        if let Err(e) = store_guard.append(event) {
+        let append_res = spawn_blocking(move || {
+            let mut s = store_clone.lock().unwrap();
+            s.append_with_sync(event, true)
+        })
+        .await;
+
+        if let Err(_) = append_res {
+            return HttpResponse::InternalServerError().body("policy evaluated append task failed");
+        }
+        if let Ok(Err(e)) = append_res {
             return HttpResponse::InternalServerError().body(format!("policy evaluated event append failed: {e:?}"));
         }
 
         // 4) Return explanation (read-only)
+        // 4) Append Consent event (audit) BEFORE returning
+        let consent_granted = matches!(pe.decision, PolicyDecision::Allow);
+        let consent_event_payload = sentinel_policy::event::make_consent_event(
+            &input.subject,
+            &pe.policy_digest,
+            &pe.input_digest,
+            consent_granted,
+            &pe.rationale,
+            Utc::now(),
+        );
+        let store_clone2 = store.clone();
+        let consent_event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: Utc::now(),
+            actor: input.subject.clone(),
+            kind: if consent_granted { EventKind::ConsentGranted } else { EventKind::ConsentDenied },
+            payload: serde_json::to_value(&consent_event_payload).expect("consent serialization"),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+        let append_res2 = spawn_blocking(move || {
+            let mut s = store_clone2.lock().unwrap();
+            s.append_with_sync(consent_event, true)
+        })
+        .await;
+        if let Err(_) = append_res2 {
+            return HttpResponse::InternalServerError().body("consent append task failed");
+        }
+        if let Ok(Err(e)) = append_res2 {
+            return HttpResponse::InternalServerError().body(format!("consent event append failed: {e:?}"));
+        }
+
         HttpResponse::Ok().json(json!({
             "decision": match pe.decision {
                 PolicyDecision::Allow => "Allow",

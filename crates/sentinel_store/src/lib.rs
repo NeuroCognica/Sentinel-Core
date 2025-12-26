@@ -212,6 +212,8 @@ pub enum EventKind {
     AuthChallengeConsumed,
     NonceConsumed,
     PolicyEvaluated,
+    ConsentGranted,
+    ConsentDenied,
     CapabilityIssued,
     // Add more event kinds as needed in future steps
 }
