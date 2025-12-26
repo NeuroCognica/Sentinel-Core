@@ -5,7 +5,8 @@ members = [
     "crates/sentinel_identity",
     "crates/sentinel_api",
     "crates/sentinel_cli",
-    "crates/sentinel_bench"
+    "crates/sentinel_bench",
+    "crates/sentinel_policy"
 ]
 
 [profile.dev]

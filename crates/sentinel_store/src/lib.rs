@@ -211,6 +211,7 @@ pub enum EventKind {
     AuthChallengeIssued,
     AuthChallengeConsumed,
     NonceConsumed,
+    PolicyEvaluated,
     CapabilityIssued,
     // Add more event kinds as needed in future steps
 }
