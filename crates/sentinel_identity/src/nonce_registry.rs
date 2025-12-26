@@ -1,6 +1,6 @@
 use crate::*;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use once_cell::sync::Lazy;
@@ -97,7 +97,17 @@ impl NonceRegistry {
 
 /// Global registry instance (lazy-initialized). This is an optional convenience for
 /// callers that want a shared, process-local cache that mirrors ledger-derived authority.
-pub static GLOBAL_NONCE_REGISTRY: Lazy<NonceRegistry> = Lazy::new(|| NonceRegistry::new_empty());
+/// A background thread periodically prunes expired entries from this in-memory cache.
+pub static GLOBAL_NONCE_REGISTRY: Lazy<Arc<NonceRegistry>> = Lazy::new(|| {
+    let reg = Arc::new(NonceRegistry::new_empty());
+    // Spawn a background thread to prune expired cached nonces every 60 seconds.
+    let reg_clone = Arc::clone(&reg);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        reg_clone.prune_expired();
+    });
+    reg
+});
 
 #[cfg(test)]
 mod tests {
