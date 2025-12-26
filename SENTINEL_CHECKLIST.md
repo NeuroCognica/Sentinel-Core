@@ -49,7 +49,7 @@ This checklist is derived from the full improvement suggestions and is designed 
 
 - [ ] **Create Comprehensive API Documentation**
 	- [x] Generate OpenAPI 3.0 spec from Rust code (utoipa or similar)
- 	- [ ] Host Swagger UI or ReDoc for interactive docs
+	- [x] Host Swagger UI or ReDoc for interactive docs (static, offline bundle)
  	- [x] Include example requests/responses for all endpoints
 	- [ ] Document error codes and meanings
 	- [ ] Add authentication and rate limiting details

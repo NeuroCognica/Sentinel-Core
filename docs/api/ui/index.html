@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sentinel API — Offline Swagger UI</title>
+    <link rel="stylesheet" type="text/css" href="swagger-ui.css" />
+    <style>body { margin:0; }</style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+
+    <script>
+      // Minimal loader: attempts to load local swagger-ui bundle
+      function missingBundle() {
+        document.getElementById('swagger-ui').innerHTML = `
+          <div style="padding:24px;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+            <h2>Offline Swagger UI</h2>
+            <p>The local Swagger UI assets are not present.</p>
+            <p>To enable interactive docs, vendor the following files into this folder:</p>
+            <ul>
+              <li><code>swagger-ui.css</code></li>
+              <li><code>swagger-ui-bundle.js</code></li>
+              <li><code>swagger-ui-standalone-preset.js</code> (optional)</li>
+              <li><code>openapi.json</code> (already present at <code>../openapi.json</code> or <code>./openapi.json</code>)</li>
+            </ul>
+            <p>See <code>../README.md</code> for vendor instructions.</p>
+          </div>`;
+      }
+
+      (function () {
+        if (typeof window.SwaggerUIBundle === 'undefined') {
+          try {
+            var s = document.createElement('script');
+            s.src = 'swagger-ui-bundle.js';
+            s.onload = initUI;
+            s.onerror = missingBundle;
+            document.head.appendChild(s);
+          } catch (e) {
+            missingBundle();
+          }
+        } else {
+          initUI();
+        }
+
+        function initUI() {
+          if (typeof SwaggerUIBundle === 'undefined') return missingBundle();
+          const urlCandidates = ['./openapi.json', '../openapi.json', '../../openapi.json'];
+          let url = urlCandidates.find(u => {
+            try {
+              // quick existence check via synchronous XHR (file:// may not allow)
+              var xhr = new XMLHttpRequest();
+              xhr.open('GET', u, false);
+              xhr.send(null);
+              return xhr.status === 200 || xhr.status === 0;
+            } catch (e) { return false; }
+          }) || './openapi.json';
+
+          SwaggerUIBundle({
+            url: url,
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [
+              SwaggerUIBundle.presets.apis,
+            ],
+            layout: 'BaseLayout'
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
