@@ -1,0 +1,12 @@
+[package]
+name = "sentinel_bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sentinel_store = { path = "../sentinel_store" }
+sentinel_identity = { path = "../sentinel_identity" }
+sentinel_core = { path = "../sentinel_core" }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
