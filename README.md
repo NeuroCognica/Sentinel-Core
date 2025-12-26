@@ -25,8 +25,9 @@ python health_check.py
 ## Workspace Structure
 - crates/sentinel_core: Core types, policy, guard logic
 - crates/sentinel_store: Append-only event log, state store
-- crates/sentinel_identity: Users, roles, sessions, events
-- crates/sentinel_api: HTTP API (login, register, health, guard)
+- crates/sentinel_identity: Users, keys, identity events, event-sourced reducer
+- crates/sentinel_capabilities: Capability model, reducer, and event-sourced state (Phase 3+)
+- crates/sentinel_api: HTTP API (login, register, health, guard, genesis, capability)
 - crates/sentinel_cli: CLI for admin/dev
 - python_ui: Python 3.12 client and UI harness
 
@@ -34,6 +35,33 @@ python health_check.py
 - Forever Law: All actions are logged before completion
 - Sentinel Law: No bypass of guard boundary
 - Never Boring: All faults are visible and queryable
+## Phase 3: Capabilities (Constitutional Privilege)
+
+- **Canonical Capability Model**: Capabilities are cryptographically signed, time-bounded, and scope-limited tokens with:
+  - `capability_id` (UUID)
+  - `actor_id` (who receives it)
+  - `issued_at_utc`, `expires_at_utc`
+  - `scope` (e.g. system, aura:memory)
+  - `actions` (strict list)
+  - `constraints` (optional, e.g. artifact digests, rate limits)
+  - `issued_by` (Sentinel service identity)
+  - `token_signature` (Ed25519 signature over canonical fields)
+
+- **Capability Events**:
+  - `CapabilityIssued`: Capability is created, signed, and logged
+  - `CapabilityRevoked`: Capability is revoked and cannot be used
+  - `CapabilityConsumed`: (Optional) Capability is used and logged as consumed
+
+- **Event-Sourced Enforcement**:
+  - All capability state is derived from the append-only ledger (no RAM truth)
+  - Capabilities are only valid if present, active, and unexpired in the ledger
+  - Revocation and consumption are logged as events and enforced by the reducer
+
+- **No Trusted Tokens**: A stolen or expired token is powerless unless the ledger says it is valid and active.
+
+- **Separation of Concerns**: Capability lifecycle is managed in `sentinel_capabilities`, not in identity or API logic. This prevents privilege escalation and keeps the system constitutional.
+
+---
 
 ## License
 MIT
