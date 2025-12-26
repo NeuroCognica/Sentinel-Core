@@ -46,6 +46,8 @@ This checklist is derived from the full improvement suggestions and is designed 
 	- [x] Add nonce expiration policy (e.g., expire after 24h)
 	- [x] Add nonce cleanup job to prevent unbounded growth
 	- [x] Document replay protection logic and test cases
+ - [x] Phase 3 — Persistent Nonce & Replay Protection (COMPLETE)
+   Completed after adversarial restart validation. Legacy nonce authority removed.
 
 - [ ] **Create Comprehensive API Documentation**
 	- [x] Generate OpenAPI 3.0 spec from Rust code (utoipa or similar)
@@ -430,6 +432,24 @@ This checklist is derived from the full improvement suggestions and is designed 
 ---
 
 **Record progress, commit often, and verify each law and invariant. This checklist is your constitutional roadmap to Sentinel Core production readiness.**
+
+## Completed (audit snapshot: 2025-12-26)
+
+The following tasks were completed and verified on 2025-12-26. They are marked here for auditors and maintainers as finished.
+
+- [x] Phase‑1..3: Rewrote `crates/sentinel_api/src/main.rs` and implemented Phase‑1 hard reset, Phase‑2 `/health`, Phase‑3 `/genesis`, `/auth/challenge`, `/auth/login` handlers and integration tests (genesis → challenge → login) — builds and tests pass locally.
+- [x] Consolidated documentation: `README.md`, `ARCHITECTURE.md`, `ROADMAP.md` reorganized; diagrams added to `docs/diagrams` (Mermaid/PlantUML sources included).
+- [x] Threat model: `THREAT_MODEL.md` created and linked.
+- [x] Persistent Nonce Registry: nonces recorded as `NonceConsumed` events; removed in-memory-only nonce tracking and added nonce consumption events in login flow.
+- [x] OpenAPI spec: canonical `openapi.json` generated and added to repo (`openapi.json`, `docs/api/openapi.json`).
+- [x] Static offline API docs: added static offline Swagger UI skeleton and docs (no third-party vendoring), plus `PUSH_MANIFEST.md` describing what must be pushed.
+- [x] Bench harness: scaffolded `crates/sentinel_bench`, implemented append throughput, chain-verify, identity-reducer and auth-path microbenchmarks; added `append_with_sync` support and run scripts; baseline 10k run executed and recorded.
+- [x] Policy crate frozen (v0): `crates/sentinel_policy` implemented canonical schema, deterministic evaluator, canonical `PolicyEvaluated` event, and digest rules; unit and integration tests added and passing.
+- [x] `POST /policy/evaluate` endpoint: read-only observability endpoint added to `sentinel_api` that constructs `PolicyEvaluated`, appends the event before responding, and returns `decision`, `policy_digest`, `input_digest`, `rationale`, and `matched_statement_index` (rules enforced per constitutional constraints).
+- [x] Secrets cleanup: removed accidental sensitive files (`crates/sentinel_api/sentinel_service.key`, `crates/sentinel_api/sentinel_events.log`) from HEAD, updated `.gitignore`, and produced a clean audit archive `sentinel-core-source.zip` containing only source + docs for auditors.
+- [x] Repo hygiene: added `.gitignore`, `PUSH_MANIFEST.md`, and updated `SENTINEL_CHECKLIST.md` with the 'What To Push' policy.
+
+If you need any completed item moved into a released changelog entry or an official release, tell me which items to include and I'll create a draft `CHANGELOG.md` and a Git tag for the release.
 
 ## What To Push (Repository Policy)
 
