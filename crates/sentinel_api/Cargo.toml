@@ -1,3 +1,4 @@
+sentinel_capabilities = { path = "../sentinel_capabilities" }
 [package]
 name = "sentinel_api"
 version = "0.1.0"

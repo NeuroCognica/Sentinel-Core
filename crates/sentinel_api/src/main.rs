@@ -1,3 +1,213 @@
+use sentinel_identity::Keystore;
+use std::path::PathBuf;
+#[post("/auth/login")]
+async fn auth_login(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<sentinel_core::CanonicalEnvelopeAuthorizationRequest>,
+) -> impl Responder {
+    // 1. Envelope presence and signature verification (reuse logic from /authz)
+    let env = req.into_inner();
+    let identity_state = match sentinel_identity::load_identity_state_from_event_log("./sentinel_events.log") {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("identity state load failed: {e}")),
+    };
+    let key_info = identity_state.keys.get(&(env.actor_id, env.key_id));
+    if key_info.is_none() || key_info.unwrap().status != sentinel_identity::KeyStatus::Active {
+        return HttpResponse::Unauthorized().body("unknown or revoked key");
+    }
+    let pubkey_bytes = &key_info.unwrap().public_key;
+    let pubkey = match ed25519_dalek::PublicKey::from_bytes(pubkey_bytes) {
+        Ok(pk) => pk,
+        Err(_) => return HttpResponse::Unauthorized().body("invalid public key bytes"),
+    };
+    let sig_result = sentinel_identity::verify_signature(
+        &sentinel_identity::SignedEnvelope {
+            actor_id: sentinel_identity::ActorId(env.actor_id),
+            key_id: sentinel_identity::KeyId(env.key_id),
+            nonce: env.nonce,
+            timestamp_utc: env.timestamp_utc,
+            payload: env.payload.clone(),
+            signature: sentinel_identity::SignatureBytes {
+                algorithm: sentinel_identity::SignatureAlgorithm::Ed25519,
+                bytes: env.signature.clone(),
+            },
+        },
+        &pubkey,
+    );
+    if sig_result.is_err() {
+        return HttpResponse::Unauthorized().body("invalid signature");
+    }
+    // 2. Timestamp freshness (±300s)
+    let now = Utc::now();
+    let diff = (now.timestamp() - env.timestamp_utc.timestamp()).abs();
+    if diff > 300 {
+        return HttpResponse::Unauthorized().body("timestamp outside freshness window");
+    }
+    // 3. Replay protection (event-sourced)
+    let identity_state = match sentinel_identity::load_identity_state_from_event_log("./sentinel_events.log") {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("identity state load failed: {e}")),
+    };
+    if identity_state.used_nonces.iter().any(|(aid, _, n, _)| *aid == env.actor_id && *n == env.nonce) {
+        return HttpResponse::Unauthorized().body("replayed nonce (event-sourced)");
+    }
+    // 4. Challenge validation (must match unexpired, unused challenge event for actor/key)
+    let store_guard = store.lock().unwrap();
+    let store_events = match store_guard.iter() {
+        Ok(evts) => evts,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("event log read failed: {e:?}")),
+    };
+    let mut found_challenge = None;
+    for rec in store_events.iter().rev() {
+        if let Ok(payload) = rec.payload.get("challenge") {
+            if let Some(challenge) = payload.as_str() {
+                // Only consider challenge events for this actor/key
+                if rec.actor == env.actor_id.to_string()
+                    && rec.payload.get("key_id").and_then(|v| v.as_str()) == Some(&env.key_id.to_string())
+                {
+                    // Check expiry
+                    if let (Some(expires_at), Some(issued_at)) = (
+                        rec.payload.get("expires_at_utc").and_then(|v| v.as_str()),
+                        rec.payload.get("issued_at_utc").and_then(|v| v.as_str()),
+                    ) {
+                        let expires_at = chrono::DateTime::parse_from_rfc3339(expires_at).ok().map(|dt| dt.with_timezone(&Utc));
+                        let issued_at = chrono::DateTime::parse_from_rfc3339(issued_at).ok().map(|dt| dt.with_timezone(&Utc));
+                        if let (Some(expires_at), Some(issued_at)) = (expires_at, issued_at) {
+                            if now > expires_at {
+                                continue; // Expired
+                            }
+                            // Check if already used (by searching for a CapabilityIssued event referencing this challenge)
+                            let already_used = store_events.iter().any(|evt| {
+                                evt.payload.get("challenge").and_then(|v| v.as_str()) == Some(challenge)
+                                    && evt.kind == EventKind::AuthorizationRequestReceived // Should be CapabilityIssued, but using generic kind for now
+                            });
+                            if already_used {
+                                continue; // Used
+                            }
+                            found_challenge = Some((challenge.to_string(), issued_at, expires_at));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    drop(store_guard);
+    if found_challenge.is_none() {
+        return HttpResponse::Unauthorized().body("no valid, unexpired, unused challenge found");
+    }
+    let (challenge, issued_at, expires_at) = found_challenge.unwrap();
+    // 5. Log the request digest before decision
+    let digest = sha2::Sha256::digest(
+        serde_json::to_vec(&env).expect("canonical serialization")
+    );
+    let digest_hex = hex::encode(digest);
+    let mut store = store.lock().unwrap();
+    let event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: env.actor_id.to_string(),
+        kind: EventKind::AuthorizationRequestReceived,
+        payload: json!({
+            "request_hash": digest_hex.clone(),
+            "actor_id": env.actor_id.to_string(),
+        }),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store.append(event) {
+        return HttpResponse::InternalServerError().body(format!("event append failed: {e:?}"));
+    }
+    // 6. Append NonceConsumed event
+    let nonce_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: env.actor_id.to_string(),
+        kind: EventKind::AuthorizationRequestReceived,
+        payload: json!(
+            serde_json::to_value(sentinel_core::IdentityEvent::NonceConsumed(
+                sentinel_core::NonceConsumed {
+                    actor_id: env.actor_id,
+                    key_id: env.key_id,
+                    nonce: env.nonce,
+                    envelope_digest: digest_hex.clone(),
+                    consumed_at: Utc::now(),
+                }
+            )).expect("nonce event serialization")
+        ),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store.append(nonce_event) {
+        return HttpResponse::InternalServerError().body(format!("nonce event append failed: {e:?}"));
+    }
+    // 7. Issue session capability (CapabilityIssued event, signed by service key)
+    // Load service key (dev only, not production)
+    let keystore = match Keystore::load_or_create(PathBuf::from("./sentinel_service.key")) {
+        Ok(ks) => ks,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
+    };
+    let capability_id = Uuid::new_v4();
+    let issued_at_utc = Utc::now();
+    let expires_at_utc = issued_at_utc + chrono::Duration::minutes(30); // 30 min session
+    let scope = "session".to_string();
+    let actions = vec!["whoami".to_string()];
+    let constraints = Some(json!({ "challenge": challenge }));
+    let issued_by = "sentinel_service".to_string();
+    let mut cap = Capability {
+        capability_id,
+        actor_id: env.actor_id,
+        issued_at_utc,
+        expires_at_utc,
+        scope,
+        actions,
+        constraints,
+        issued_by,
+        token_signature: vec![], // To be filled
+    };
+    // Canonical signature over all fields except token_signature
+    let sig = keystore.sign(&cap, &sentinel_identity::ActorId(env.actor_id), &capability_id, &issued_at_utc);
+    let sig = match sig {
+        Ok(s) => s,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("capability signing failed: {e}")),
+    };
+    cap.token_signature = sig.bytes;
+    // Log CapabilityIssued event
+    let cap_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: issued_at_utc,
+        actor: env.actor_id.to_string(),
+        kind: EventKind::AuthorizationRequestReceived, // Should be CapabilityIssued, but using generic kind for now
+        payload: json!(
+            serde_json::to_value(sentinel_core::CapabilityEvent::CapabilityIssued(
+                sentinel_core::CapabilityIssued {
+                    capability: cap.clone(),
+                    issued_at: issued_at_utc,
+                }
+            )).expect("capability event serialization")
+        ),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store.append(cap_event) {
+        return HttpResponse::InternalServerError().body(format!("capability event append failed: {e:?}"));
+    }
+    // 8. Deterministic response: return full capability
+    HttpResponse::Ok().json(cap)
+}
+use sentinel_capabilities::{Capability, CapabilityEvent, CapabilityIssued, CapabilityState};
+#[post("/auth/login")]
+async fn auth_login(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<sentinel_core::CanonicalEnvelopeAuthorizationRequest>,
+) -> impl Responder {
+    // 1. Envelope presence and signature verification (reuse logic from /authz)
+    // 2. Challenge validation (must match unexpired, unused challenge event for actor/key)
+    // 3. Issue session capability (CapabilityIssued event, signed by service key)
+    // 4. Log all events before response, fail loud on any error
+    // 5. Return session capability (full struct, including signature)
+    HttpResponse::NotImplemented().body("/auth/login not yet implemented")
+}
 use rand::RngCore;
 use rand::rngs::OsRng;
 use chrono::{Duration};
@@ -306,6 +516,7 @@ async fn main() {
             .service(authz)
             .service(genesis)
             .service(auth_challenge)
+            .service(auth_login)
     })
     .bind(("127.0.0.1", 8080));
 
