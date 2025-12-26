@@ -1,3 +1,65 @@
+#[post("/whoami")]
+async fn whoami(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<Capability>,
+) -> impl Responder {
+    // 1. Verify capability signature (using issued_by/service key)
+    let cap = req.into_inner();
+    let keystore = match Keystore::load_or_create(PathBuf::from("./sentinel_service.key")) {
+        Ok(ks) => ks,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
+    };
+    let sig_ok = keystore
+        .public_key()
+        .verify(
+            &serde_json::to_vec(&Capability {
+                token_signature: vec![],
+                ..cap.clone()
+            })
+            .expect("canonical cap serialization"),
+            &ed25519_dalek::Signature::from_bytes(&cap.token_signature).unwrap_or_default(),
+        )
+        .is_ok();
+    if !sig_ok {
+        return HttpResponse::Unauthorized().body("invalid capability signature");
+    }
+    // 2. Event-sourced capability state: must be present, active, unexpired
+    let store_guard = store.lock().unwrap();
+    let store_events = match store_guard.iter() {
+        Ok(evts) => evts,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("event log read failed: {e:?}")),
+    };
+    let mut cap_events = Vec::new();
+    for rec in store_events.iter() {
+        if let Ok(ev) = serde_json::from_value::<sentinel_core::CapabilityEvent>(rec.payload.clone()) {
+            cap_events.push(ev);
+        }
+    }
+    let valid_actors = std::iter::once(cap.actor_id).collect();
+    let cap_state = match CapabilityState::reduce(cap_events, &valid_actors) {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("capability state error: {e}")),
+    };
+    let now = Utc::now();
+    let found = cap_state.active.get(&cap.capability_id);
+    if found.is_none() {
+        return HttpResponse::Unauthorized().body("capability not active");
+    }
+    if now > cap.expires_at_utc {
+        return HttpResponse::Unauthorized().body("capability expired");
+    }
+    // 3. Guard: must have whoami in actions
+    if !cap.actions.iter().any(|a| a == "whoami") {
+        return HttpResponse::Forbidden().body("capability does not allow whoami");
+    }
+    // 4. Return actor_id, key_id (None for session), and TTL
+    let ttl = (cap.expires_at_utc - now).num_seconds();
+    HttpResponse::Ok().json(json!({
+        "actor_id": cap.actor_id,
+        "key_id": null,
+        "ttl_seconds": ttl,
+    }))
+}
 #[post("/auth/logout")]
 async fn auth_logout(
     store: web::Data<Mutex<FileEventStore>>,
@@ -592,6 +654,7 @@ async fn main() {
             .service(auth_challenge)
             .service(auth_login)
             .service(auth_logout)
+            .service(whoami)
     })
     .bind(("127.0.0.1", 8080));
 
