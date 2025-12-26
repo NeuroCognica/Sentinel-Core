@@ -214,6 +214,7 @@ pub enum EventKind {
     PolicyEvaluated,
     ConsentGranted,
     ConsentDenied,
+    EffectExecuted,
     CapabilityIssued,
     // Add more event kinds as needed in future steps
 }

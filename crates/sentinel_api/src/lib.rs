@@ -487,3 +487,122 @@ pub async fn auth_login(
             "matched_statement_index": pe.matched_statement_index,
         }))
     }
+
+    #[post("/privileged/action")]
+    pub async fn privileged_action(
+        store: web::Data<Mutex<FileEventStore>>,
+        req: web::Json<serde_json::Value>,
+    ) -> impl Responder {
+        // Expect `policy` and `input` in body
+        let body = req.into_inner();
+        let policy_value = body.get("policy");
+        let input_value = body.get("input");
+        if policy_value.is_none() || input_value.is_none() {
+            return HttpResponse::BadRequest().body("missing policy or input");
+        }
+        let policy: Policy = match serde_json::from_value(policy_value.unwrap().clone()) {
+            Ok(p) => p,
+            Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
+        };
+        let input: PolicyInput = match serde_json::from_value(input_value.unwrap().clone()) {
+            Ok(i) => i,
+            Err(e) => return HttpResponse::BadRequest().body(format!("invalid input object: {e}")),
+        };
+
+        // 1) Evaluate (pure)
+        let now = Utc::now();
+        let pe = make_policy_evaluated(&policy, &input, "v0", now);
+
+        // 2) Append PolicyEvaluated durable
+        let store_clone = store.clone();
+        let pe_clone = pe.clone();
+        let event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: now,
+            actor: "policy_evaluator".to_string(),
+            kind: EventKind::PolicyEvaluated,
+            payload: serde_json::to_value(&pe_clone).expect("policy evaluated serialization"),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+        let append_res = spawn_blocking(move || {
+            let mut s = store_clone.lock().unwrap();
+            s.append_with_sync(event, true)
+        })
+        .await;
+        if let Err(_) = append_res {
+            return HttpResponse::InternalServerError().body("policy evaluated append task failed");
+        }
+        if let Ok(Err(e)) = append_res {
+            return HttpResponse::InternalServerError().body(format!("policy evaluated event append failed: {e:?}"));
+        }
+
+        // 3) Append Consent event durable
+        let consent_granted = matches!(pe.decision, PolicyDecision::Allow);
+        let consent_event_payload = sentinel_policy::event::make_consent_event(
+            &input.subject,
+            &pe.policy_digest,
+            &pe.input_digest,
+            consent_granted,
+            &pe.rationale,
+            Utc::now(),
+        );
+        let store_clone2 = store.clone();
+        let consent_event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: Utc::now(),
+            actor: input.subject.clone(),
+            kind: if consent_granted { EventKind::ConsentGranted } else { EventKind::ConsentDenied },
+            payload: serde_json::to_value(&consent_event_payload).expect("consent serialization"),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+        let append_res2 = spawn_blocking(move || {
+            let mut s = store_clone2.lock().unwrap();
+            s.append_with_sync(consent_event, true)
+        })
+        .await;
+        if let Err(_) = append_res2 {
+            return HttpResponse::InternalServerError().body("consent append task failed");
+        }
+        if let Ok(Err(e)) = append_res2 {
+            return HttpResponse::InternalServerError().body(format!("consent event append failed: {e:?}"));
+        }
+
+        // 4) If allowed, perform effect (append EffectExecuted). If denied, return forbidden.
+        if !consent_granted {
+            return HttpResponse::Forbidden().body("policy denied");
+        }
+
+        // 4a) Optional test hook: simulate append failure if input.context.simulate_append_failure == true
+        if let Some(v) = input.context.get("simulate_append_failure") {
+            if v.as_bool().unwrap_or(false) {
+                return HttpResponse::InternalServerError().body("simulated append failure");
+            }
+        }
+
+        // Append EffectExecuted event durable
+        let store_clone3 = store.clone();
+        let effect_event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: Utc::now(),
+            actor: input.subject.clone(),
+            kind: EventKind::EffectExecuted,
+            payload: json!({ "effect": "privileged_action_executed", "policy_digest": pe.policy_digest, "input_digest": pe.input_digest }),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+        let append_res3 = spawn_blocking(move || {
+            let mut s = store_clone3.lock().unwrap();
+            s.append_with_sync(effect_event, true)
+        })
+        .await;
+        if let Err(_) = append_res3 {
+            return HttpResponse::InternalServerError().body("effect append task failed");
+        }
+        if let Ok(Err(e)) = append_res3 {
+            return HttpResponse::InternalServerError().body(format!("effect event append failed: {e:?}"));
+        }
+
+        HttpResponse::Ok().json(json!({ "result": "effect executed" }))
+    }
