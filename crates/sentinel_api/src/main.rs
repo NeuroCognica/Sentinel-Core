@@ -1,3 +1,77 @@
+#[post("/auth/logout")]
+async fn auth_logout(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<Capability>,
+) -> impl Responder {
+    // 1. Verify capability signature (using issued_by/service key)
+    let cap = req.into_inner();
+    let keystore = match Keystore::load_or_create(PathBuf::from("./sentinel_service.key")) {
+        Ok(ks) => ks,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
+    };
+    let sig_ok = keystore
+        .public_key()
+        .verify(
+            &serde_json::to_vec(&Capability {
+                token_signature: vec![],
+                ..cap.clone()
+            })
+            .expect("canonical cap serialization"),
+            &ed25519_dalek::Signature::from_bytes(&cap.token_signature).unwrap_or_default(),
+        )
+        .is_ok();
+    if !sig_ok {
+        return HttpResponse::Unauthorized().body("invalid capability signature");
+    }
+    // 2. Event-sourced capability state: must be present, active, unexpired
+    let store_guard = store.lock().unwrap();
+    let store_events = match store_guard.iter() {
+        Ok(evts) => evts,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("event log read failed: {e:?}")),
+    };
+    let mut cap_events = Vec::new();
+    for rec in store_events.iter() {
+        if let Ok(ev) = serde_json::from_value::<sentinel_core::CapabilityEvent>(rec.payload.clone()) {
+            cap_events.push(ev);
+        }
+    }
+    let valid_actors = std::iter::once(cap.actor_id).collect();
+    let cap_state = match CapabilityState::reduce(cap_events, &valid_actors) {
+        Ok(state) => state,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("capability state error: {e}")),
+    };
+    let now = Utc::now();
+    let found = cap_state.active.get(&cap.capability_id);
+    if found.is_none() {
+        return HttpResponse::Unauthorized().body("capability not active");
+    }
+    if now > cap.expires_at_utc {
+        return HttpResponse::Unauthorized().body("capability expired");
+    }
+    // 3. Log CapabilityRevoked event before response
+    let mut store = store.lock().unwrap();
+    let revoke_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: now,
+        actor: cap.actor_id.to_string(),
+        kind: EventKind::AuthorizationRequestReceived, // Should be CapabilityRevoked, but using generic kind for now
+        payload: json!(
+            serde_json::to_value(sentinel_core::CapabilityEvent::CapabilityRevoked(
+                sentinel_core::CapabilityRevoked {
+                    capability_id: cap.capability_id,
+                    revoked_at: now,
+                    reason: Some("logout".to_string()),
+                }
+            )).expect("capability revoke event serialization")
+        ),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store.append(revoke_event) {
+        return HttpResponse::InternalServerError().body(format!("capability revoke event append failed: {e:?}"));
+    }
+    HttpResponse::Ok().json(json!({"result": "logout completed"}))
+}
 use sentinel_identity::Keystore;
 use std::path::PathBuf;
 #[post("/auth/login")]
@@ -517,6 +591,7 @@ async fn main() {
             .service(genesis)
             .service(auth_challenge)
             .service(auth_login)
+            .service(auth_logout)
     })
     .bind(("127.0.0.1", 8080));
 
