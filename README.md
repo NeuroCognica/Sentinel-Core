@@ -39,33 +39,22 @@ This repository implements Sentinel Core: a governed, append-only, event-sourced
 - All tests must pass before canonical commit; all failures are visible and attributable.
 
 **Law-Driven Guarantees**
-- FOREVER LAW: All actions of consequence are recorded immutably before completion.
-- SENTINEL LAW: No privileged action may bypass the guard boundary.
-- NEVER BORING LAW: All failures are visible, attributable, and queryable.
 
----
 
 
 ## Quick Start
-
 ### Prerequisites
 - Rust (latest stable)
-- Python 3.12 (not 3.13+)
 
 ### Build and Run (Rust)
-
 ```
 cargo build
 cargo run -p sentinel_api
 ```
-
 ### Python UI Health Check
-
 ```
-cd python_ui
 python health_check.py
 ```
-
 ## Workspace Structure
 - crates/sentinel_core: Core types, policy, guard logic
 - crates/sentinel_store: Append-only event log, state store
