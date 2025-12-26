@@ -3,7 +3,7 @@ pub mod digest;
 pub mod event;
 
 pub use policy::{evaluate, Policy, PolicyDecision, PolicyInput};
-pub use digest::{canonical_bytes, policy_digest};
+pub use digest::{canonical_bytes, policy_digest, input_digest};
 pub use event::{make_policy_evaluated, PolicyEvaluated, Decision as PolicyDecisionEnum};
 
 #[cfg(test)]
