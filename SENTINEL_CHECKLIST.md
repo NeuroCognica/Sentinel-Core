@@ -4,6 +4,13 @@ This checklist is derived from the full improvement suggestions and is designed 
 
 ---
 
+## Build Progress
+
+- [x] `crates/sentinel_api/src/main.rs` hard-reset to minimal Phase-1 file (cleaned of merge artifacts and hidden bytes) — 2025-12-25
+- [x] `cargo build -p sentinel_api` completed after cleanup (warnings only) — 2025-12-25
+ - [x] Phase 2: runtime boot + `/health` handler implemented and builds — 2025-12-25
+
+
 
 ## Immediate (Before Phase 4)
 
@@ -29,12 +36,12 @@ This checklist is derived from the full improvement suggestions and is designed 
 	- [x] Document residual risks and accepted tradeoffs
 	- [x] Reference STRIDE or ATT&CK framework
 
-- [ ] **Implement Persistent Nonce Registry**
-	- [ ] Ensure all consumed nonces are logged as NonceConsumed events
-	- [ ] Remove any in-memory-only nonce tracking
-	- [ ] Add nonce expiration policy (e.g., expire after 24h)
-	- [ ] Add nonce cleanup job to prevent unbounded growth
-	- [ ] Document replay protection logic and test cases
+ - [x] **Implement Persistent Nonce Registry**
+	- [x] Ensure all consumed nonces are logged as NonceConsumed events
+	- [x] Remove any in-memory-only nonce tracking
+	- [x] Add nonce expiration policy (e.g., expire after 24h)
+	- [x] Add nonce cleanup job to prevent unbounded growth
+	- [x] Document replay protection logic and test cases
 
 - [ ] **Create Comprehensive API Documentation**
 	- [ ] Generate OpenAPI 3.0 spec from Rust code (utoipa or similar)

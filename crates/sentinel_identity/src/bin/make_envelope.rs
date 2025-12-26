@@ -2,11 +2,11 @@
 // Helper to generate a canonical signed envelope for Phase 2 · Step 1 verification
 // This must match the server's canonical serialization and signing rules exactly
 
+use chrono::{DateTime, Utc};
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer};
-use serde::{Serialize, Deserialize};
-use uuid::Uuid;
-use chrono::{Utc, DateTime};
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use uuid::Uuid;
 // ...existing code...
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

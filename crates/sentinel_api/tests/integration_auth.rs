@@ -1,37 +1,30 @@
-//! Adversarial and constitutional tests for /auth/challenge, /auth/login, /auth/logout, /whoami
-//! These tests verify all guard boundaries, event logging, signature enforcement, replay, and fail-closed behavior.
-
 use actix_web::{test, App};
-use sentinel_core::{CanonicalEnvelopeAuthorizationRequest, AuthorizationRequest, Capability};
-use uuid::Uuid;
-use chrono::Utc;
 use serde_json::json;
 
 #[actix_rt::test]
 async fn test_challenge_login_happy_path() {
-    use actix_web::{test, App};
-    use sentinel_api::main as _; // ensure module available
-
     // Ensure a clean event log
     let _ = std::fs::remove_file("./sentinel_events.log");
 
-    // Create store and app
+    // Create store and app data
     let store = sentinel_store::FileEventStore::open("./sentinel_events.log").expect("open store");
     let store_data = actix_web::web::Data::new(std::sync::Mutex::new(store));
 
     let app = test::init_service(
         App::new()
             .app_data(store_data.clone())
-            .service(crate::health)
-            .service(crate::genesis)
-            .service(crate::auth_challenge)
-            .service(crate::auth_login),
+            .service(sentinel_api::health)
+            .service(sentinel_api::genesis)
+            .service(sentinel_api::auth_challenge)
+            .service(sentinel_api::auth_login),
     )
     .await;
 
-    // 1) Create actor keypair
-    let mut csprng = rand::rngs::OsRng {};
-    let kp = ed25519_dalek::Keypair::generate(&mut csprng);
+    // 1) Create deterministic actor keypair (no RNG) for test
+    let seed = [42u8; 32];
+    let secret = ed25519_dalek::SecretKey::from_bytes(&seed).expect("secret key");
+    let public = ed25519_dalek::PublicKey::from(&secret);
+    let kp = ed25519_dalek::Keypair { secret, public };
     let pub_hex = hex::encode(kp.public.to_bytes());
     let actor_id = uuid::Uuid::new_v4();
     let key_id = uuid::Uuid::new_v4();
@@ -39,25 +32,31 @@ async fn test_challenge_login_happy_path() {
     // 2) POST /genesis
     let req = test::TestRequest::post()
         .uri("/genesis")
-        .set_json(&serde_json::json!({
+        .set_json(&json!({
             "actor_id": actor_id.to_string(),
             "key_id": key_id.to_string(),
             "public_key": pub_hex,
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert!(resp.status().is_success());
+    if !resp.status().is_success() {
+        let body_bytes = test::read_body(resp).await;
+        panic!("genesis failed: {}", String::from_utf8_lossy(&body_bytes));
+    }
 
     // 3) POST /auth/challenge
     let req = test::TestRequest::post()
         .uri("/auth/challenge")
-        .set_json(&serde_json::json!({
+        .set_json(&json!({
             "actor_id": actor_id.to_string(),
             "key_id": key_id.to_string(),
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert!(resp.status().is_success());
+    if !resp.status().is_success() {
+        let body_bytes = test::read_body(resp).await;
+        panic!("challenge failed: {}", String::from_utf8_lossy(&body_bytes));
+    }
     let body: serde_json::Value = test::read_body_json(resp).await;
     let challenge = body.get("challenge").and_then(|v| v.as_str()).unwrap().to_string();
 
@@ -70,6 +69,7 @@ async fn test_challenge_login_happy_path() {
     let nonce = uuid::Uuid::new_v4();
     let timestamp = chrono::Utc::now();
     use sentinel_identity::{ActorId, KeyId};
+    use ed25519_dalek::Signer;
     let data = serde_json::to_vec(&(ActorId(actor_id), KeyId(key_id), nonce, timestamp, &payload)).unwrap();
     let sig = kp.sign(&data);
 
@@ -87,33 +87,10 @@ async fn test_challenge_login_happy_path() {
         .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert!(resp.status().is_success());
+    if !resp.status().is_success() {
+        let body_bytes = test::read_body(resp).await;
+        panic!("login failed: {}", String::from_utf8_lossy(&body_bytes));
+    }
     let cap: sentinel_core::Capability = test::read_body_json(resp).await;
     assert_eq!(cap.actor_id, actor_id);
 }
-
-#[actix_rt::test]
-async fn test_challenge_replay_fails() {
-    // TODO: Implement replay attack test: challenge cannot be reused
-    assert!(true, "placeholder");
-}
-
-#[actix_rt::test]
-async fn test_login_with_invalid_signature_fails() {
-    // TODO: Implement signature tampering test: login fails with invalid signature
-    assert!(true, "placeholder");
-}
-
-#[actix_rt::test]
-async fn test_whoami_with_revoked_capability_fails() {
-    // TODO: Implement test: whoami fails after logout (capability revoked)
-    assert!(true, "placeholder");
-}
-
-#[actix_rt::test]
-async fn test_login_with_expired_challenge_fails() {
-    // TODO: Implement test: login fails if challenge is expired
-    assert!(true, "placeholder");
-}
-
-// More adversarial and edge-case tests should be added for full constitutional coverage.

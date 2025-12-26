@@ -8,8 +8,8 @@ pub struct Capability {
     pub scope: String,
     pub actions: Vec<String>,
     pub constraints: Option<serde_json::Value>, // Flexible, e.g. artifact digests, rate limits
-    pub issued_by: String, // Sentinel service identity
-    pub token_signature: Vec<u8>, // Ed25519 signature over canonical fields
+    pub issued_by: String,                      // Sentinel service identity
+    pub token_signature: Vec<u8>,               // Ed25519 signature over canonical fields
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -95,12 +95,29 @@ pub struct NonceConsumed {
     pub envelope_digest: String, // hex-encoded SHA-256 of canonical envelope
     pub consumed_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthChallengeIssued {
+    pub challenge: String,
+    pub actor_id: Uuid,
+    pub key_id: Uuid,
+    pub issued_at_utc: DateTime<Utc>,
+    pub expires_at_utc: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthChallengeConsumed {
+    pub challenge: String,
+    pub actor_id: Uuid,
+    pub key_id: Uuid,
+    pub consumed_at_utc: DateTime<Utc>,
+}
 // sentinel_core: types, policy engine interfaces, guard logic, error types
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // ...existing code...
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 /// Canonical constitutional envelope for all privileged requests
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -23,3 +23,11 @@ ed25519-dalek = { version = "1", features = ["serde"] }
 
 sentinel_core = { path = "../sentinel_core" }
 sentinel_identity = { path = "../sentinel_identity" }
+
+
+[features]
+openapi = ["utoipa"]
+
+[dependencies.utoipa]
+version = "4"
+optional = true

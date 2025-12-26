@@ -1,0 +1,286 @@
+note: to keep the current resolver, specify `workspace.resolver = "1"` in the workspace root's manifest
+note: to use the edition 2021 resolver, specify `workspace.resolver = "2"` in the workspace root's manifest
+note: for more details see https://doc.rust-lang.org/cargo/reference/resolver.html#resolver-versions
+ --> crates\sentinel_identity\src\lib.rs:3:33
+  |
+3 | use sentinel_store::{EventKind, EventRecord, EventStore, FileEventStore};
+  |                                 ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+  --> crates\sentinel_identity\src\lib.rs:27:5
+   |
+27 |     ActorRegistered, IdentityEvent, KeyRegistered, KeyRevoked, KeyRotated, NonceConsumed,
+   |     ^^^^^^^^^^^^^^^                 ^^^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^^
+
+ --> crates\sentinel_capabilities\src\lib.rs:1:14
+  |
+1 | use chrono::{DateTime, Utc};
+  |              ^^^^^^^^  ^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling sentinel_api v0.1.0 (C:\sentinel-core\crates\sentinel_api)
+error[E0428]: the name `main` is defined multiple times
+   --> crates\sentinel_api\src\main.rs:627:1
+    |
+ 17 | #[actix_web::main]
+    | ------------------ previous definition of the value `main` here
+...
+627 | #[actix_web::main]
+    | ^^^^^^^^^^^^^^^^^^ `main` redefined here
+    |
+    = note: `main` must be defined only once in the value namespace of this module
+    = note: this error originates in the attribute macro `::actix_web::rt::main` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0425]: cannot find value `auth_logout` in this scope
+  --> crates\sentinel_api\src\main.rs:42:22
+   |
+42 |             .service(auth_logout)
+   |                      ^^^^^^^^^^^ help: a unit struct with a similar name exists: `auth_login`
+...
+54 |     #[post("/auth/login")]
+   |     ---------------------- similarly named unit struct `auth_login` defined here
+
+error[E0425]: cannot find value `identity_state` in this scope
+   --> crates\sentinel_api\src\main.rs:567:8
+    |
+567 |     if identity_state
+    |        ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:570:42
+    |
+570 |         .any(|(aid, _, n, _, _)| *aid == env.actor_id && *n == env.nonce)
+    |                                          ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:570:64
+    |
+570 |         .any(|(aid, _, n, _, _)| *aid == env.actor_id && *n == env.nonce)
+    |                                                                ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:576:59
+    |
+576 |     let digest = sha2::Sha256::digest(serde_json::to_vec(&env).expect("canonical serialization"));
+    |                                                           ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:584:16
+    |
+584 |         actor: env.actor_id.to_string(),
+    |                ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:588:25
+    |
+588 |             "actor_id": env.actor_id.to_string(),
+    |                         ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:601:16
+    |
+601 |         actor: env.actor_id.to_string(),
+    |                ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:606:31
+    |
+606 |                     actor_id: env.actor_id,
+    |                               ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:607:29
+    |
+607 |                     key_id: env.key_id,
+    |                             ^^^ not a value
+
+error[E0423]: expected value, found macro `env`
+   --> crates\sentinel_api\src\main.rs:608:28
+    |
+608 |                     nonce: env.nonce,
+    |                            ^^^ not a value
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `panic`
+   --> crates\sentinel_api\src\main.rs:630:5
+    |
+630 |     panic::set_hook(Box::new(|info| {
+    |     ^^^^^ use of unresolved module or unlinked crate `panic`
+    |
+    = help: if you wanted to use a crate named `panic`, use `cargo add panic` to add it to your `Cargo.toml`
+help: consider importing this module
+    |
+  1 + use std::panic;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `FileEventStore`
+   --> crates\sentinel_api\src\main.rs:635:23
+    |
+635 |     let store = match FileEventStore::open("./sentinel_events.log") {
+    |                       ^^^^^^^^^^^^^^ use of undeclared type `FileEventStore`
+    |
+help: consider importing this struct
+    |
+  1 + use sentinel_store::FileEventStore;
+    |
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `web`
+   --> crates\sentinel_api\src\main.rs:642:17
+    |
+642 |     let store = web::Data::new(Mutex::new(store));
+    |                 ^^^ use of unresolved module or unlinked crate `web`
+    |
+    = help: if you wanted to use a crate named `web`, use `cargo add web` to add it to your `Cargo.toml`
+help: consider importing this struct
+    |
+  1 + use actix_web::web::Data;
+    |
+help: if you import `Data`, refer to it directly
+    |
+642 -     let store = web::Data::new(Mutex::new(store));
+642 +     let store = Data::new(Mutex::new(store));
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Mutex`
+   --> crates\sentinel_api\src\main.rs:642:32
+    |
+642 |     let store = web::Data::new(Mutex::new(store));
+    |                                ^^^^^ use of undeclared type `Mutex`
+    |
+help: consider importing one of these structs
+    |
+  1 + use std::sync::Mutex;
+    |
+  1 + use std::sync::nonpoison::Mutex;
+    |
+  1 + use tokio::sync::Mutex;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `HttpServer`
+   --> crates\sentinel_api\src\main.rs:644:18
+    |
+644 |     let server = HttpServer::new(move || {
+    |                  ^^^^^^^^^^ use of undeclared type `HttpServer`
+    |
+help: consider importing this struct
+    |
+  1 + use actix_web::HttpServer;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `App`
+   --> crates\sentinel_api\src\main.rs:645:9
+    |
+645 |         App::new()
+    |         ^^^ use of undeclared type `App`
+    |
+help: consider importing this struct
+    |
+  1 + use actix_web::App;
+    |
+
+error[E0425]: cannot find value `health` in this scope
+   --> crates\sentinel_api\src\main.rs:647:22
+    |
+647 |             .service(health)
+    |                      ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `authz` in this scope
+   --> crates\sentinel_api\src\main.rs:648:22
+    |
+648 |             .service(authz)
+    |                      ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `genesis` in this scope
+   --> crates\sentinel_api\src\main.rs:649:22
+    |
+649 |             .service(genesis)
+    |                      ^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `auth_challenge` in this scope
+   --> crates\sentinel_api\src\main.rs:650:22
+    |
+650 |             .service(auth_challenge)
+    |                      ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `auth_login` in this scope
+   --> crates\sentinel_api\src\main.rs:651:22
+    |
+651 |             .service(auth_login)
+    |                      ^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `auth_logout` in this scope
+   --> crates\sentinel_api\src\main.rs:652:22
+    |
+652 |             .service(auth_logout)
+    |                      ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `whoami` in this scope
+   --> crates\sentinel_api\src\main.rs:653:22
+    |
+653 |             .service(whoami)
+    |                      ^^^^^^ not found in this scope
+
+   --> crates\sentinel_api\src\main.rs:289:9
+    |
+289 |     use sentinel_capabilities::CapabilityState;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   --> crates\sentinel_api\src\main.rs:290:37
+    |
+290 |     use sentinel_core::{Capability, CapabilityEvent, CapabilityIssued};
+    |                                     ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+   --> crates\sentinel_api\src\main.rs:470:72
+    |
+470 |         load_identity_state_from_event_log, verify_signature, ActorId, IdentityState, KeyId,
+    |                                                                        ^^^^^^^^^^^^^
+
+   --> crates\sentinel_api\src\main.rs:173:25
+    |
+173 |         let (challenge, issued_at, expires_at) = found_challenge.unwrap();
+    |                         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_issued_at`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+   --> crates\sentinel_api\src\main.rs:173:36
+    |
+173 |         let (challenge, issued_at, expires_at) = found_challenge.unwrap();
+    |                                    ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_expires_at`
+
+   --> crates\sentinel_api\src\main.rs:349:13
+    |
+349 |         let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
+    |             ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_identity_state`
+
+error[E0308]: mismatched types
+   --> crates\sentinel_api\src\main.rs:506:25
+    |
+506 |       ) -> impl Responder {
+    |  _________________________^
+507 | |         // 1. Envelope presence
+508 | |         let env = req.into_inner();
+...   |
+561 | |     }
+    | |_____^ expected `HttpResponse`, found `()`
+    |
+    = note: expected struct `HttpResponse`
+            found unit type `()`
+
+error[E0308]: mismatched types
+  --> crates\sentinel_api\src\main.rs:17:1
+   |
+17 | #[actix_web::main]
+   | ^^^^^^^^^^^^^^^^^^ expected `()`, found `HttpResponse`
+18 | async fn main() {
+   |                - expected `()` because of default return type
+   |
+   = note: expected unit type `()`
+                 found struct `HttpResponse`
+   = note: this error originates in the attribute macro `::actix_web::rt::main` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0308, E0423, E0425, E0428, E0433.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `sentinel_api` (bin "sentinel_api") due to 27 previous errors; 6 warnings emitted

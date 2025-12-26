@@ -1,8 +1,8 @@
+use rand::{seq::SliceRandom, thread_rng};
+use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use sha2::{Digest, Sha256};
-use rand::{seq::SliceRandom, thread_rng};
 // Append-only, file-backed EventStore implementation
 pub struct FileEventStore {
     path: PathBuf,
@@ -13,20 +13,22 @@ impl FileEventStore {
         let pathbuf = path.as_ref().to_path_buf();
         // Create file if it doesn't exist, open for append otherwise
         if let Err(e) = OpenOptions::new().create(true).append(true).open(&pathbuf) {
-            return Err(EventStoreError::IoError(format!("Failed to open or create file: {e}")));
+            return Err(EventStoreError::IoError(format!(
+                "Failed to open or create file: {e}"
+            )));
         }
         // Themed error messages for corruption
-        const ERROR_MESSAGES: &[&str] = &[ 
-            "ERROR DETECTED - SENTINEL CLOSING PORTAL!", 
-            "INTEGRITY BREACH - SHUTTING DOWN THE GATE!", 
-            "ALERT: CHRONICLE TAMPERED - SYSTEM LOCKDOWN!", 
-            "SENTINEL WARNING: EVENT LOG CORRUPTION!", 
-            "FATAL: HASH CHAIN BROKEN - ACCESS DENIED!", 
-            "SECURITY FAILURE - THE PORTAL IS SEALED!", 
-            "CRITICAL ERROR - AUDIT TRAIL COMPROMISED!", 
-            "DANGER: UNAUTHORIZED ALTERATION DETECTED!", 
-            "SENTINEL PANIC - CHAIN OF TRUST VIOLATED!", 
-            "EMERGENCY: LOG INTEGRITY FAILURE!" 
+        const ERROR_MESSAGES: &[&str] = &[
+            "ERROR DETECTED - SENTINEL CLOSING PORTAL!",
+            "INTEGRITY BREACH - SHUTTING DOWN THE GATE!",
+            "ALERT: CHRONICLE TAMPERED - SYSTEM LOCKDOWN!",
+            "SENTINEL WARNING: EVENT LOG CORRUPTION!",
+            "FATAL: HASH CHAIN BROKEN - ACCESS DENIED!",
+            "SECURITY FAILURE - THE PORTAL IS SEALED!",
+            "CRITICAL ERROR - AUDIT TRAIL COMPROMISED!",
+            "DANGER: UNAUTHORIZED ALTERATION DETECTED!",
+            "SENTINEL PANIC - CHAIN OF TRUST VIOLATED!",
+            "EMERGENCY: LOG INTEGRITY FAILURE!",
         ];
         let store = FileEventStore { path: pathbuf };
         // Only check if file is non-empty
@@ -36,21 +38,33 @@ impl FileEventStore {
             let mut prev_hash: Option<String> = None;
             let mut rng = thread_rng();
             for (idx, line) in reader.lines().enumerate() {
-                let line = line.map_err(|e| EventStoreError::IoError(format!("Failed to read line {idx}: {e}")))?;
-                let event: EventRecord = serde_json::from_str(&line)
-                    .map_err(|e| EventStoreError::Corruption(format!("Corrupt event at line {idx}: {e}")))?;
+                let line = line.map_err(|e| {
+                    EventStoreError::IoError(format!("Failed to read line {idx}: {e}"))
+                })?;
+                let event: EventRecord = serde_json::from_str(&line).map_err(|e| {
+                    EventStoreError::Corruption(format!("Corrupt event at line {idx}: {e}"))
+                })?;
                 // Check prev_hash matches
                 if event.prev_hash != prev_hash {
-                    let msg = ERROR_MESSAGES.choose(&mut rng).unwrap_or(&ERROR_MESSAGES[0]);
+                    let msg = ERROR_MESSAGES
+                        .choose(&mut rng)
+                        .unwrap_or(&ERROR_MESSAGES[0]);
                     eprintln!("\n==============================\n{msg}\nHash chain broken at line {idx}: prev_hash mismatch\n==============================\n");
-                    return Err(EventStoreError::Corruption(format!("Hash chain broken at line {idx}: prev_hash mismatch")));
+                    return Err(EventStoreError::Corruption(format!(
+                        "Hash chain broken at line {idx}: prev_hash mismatch"
+                    )));
                 }
                 // Check hash is correct
                 let expected_hash = compute_event_hash(&event);
                 if event.hash != expected_hash {
-                    let msg = ERROR_MESSAGES.choose(&mut rng).unwrap_or(&ERROR_MESSAGES[0]);
+                    let msg = ERROR_MESSAGES
+                        .choose(&mut rng)
+                        .unwrap_or(&ERROR_MESSAGES[0]);
                     eprintln!("\n==============================\n{msg}\nHash mismatch at line {idx}: expected {expected_hash}, found {}\n==============================\n", event.hash);
-                    return Err(EventStoreError::Corruption(format!("Hash mismatch at line {idx}: expected {expected_hash}, found {}", event.hash)));
+                    return Err(EventStoreError::Corruption(format!(
+                        "Hash mismatch at line {idx}: expected {expected_hash}, found {}",
+                        event.hash
+                    )));
                 }
                 prev_hash = Some(event.hash.clone());
             }
@@ -67,9 +81,8 @@ impl EventStore for FileEventStore {
             if let Ok(file) = file {
                 let reader = BufReader::new(file);
                 reader.lines().last().and_then(|line| {
-                    line.ok().and_then(|l| {
-                        serde_json::from_str::<EventRecord>(&l).ok().map(|e| e.hash)
-                    })
+                    line.ok()
+                        .and_then(|l| serde_json::from_str::<EventRecord>(&l).ok().map(|e| e.hash))
                 })
             } else {
                 None
@@ -82,9 +95,12 @@ impl EventStore for FileEventStore {
             .create(true)
             .append(true)
             .open(&self.path)
-            .map_err(|e| EventStoreError::IoError(format!("Failed to open file for append: {e}")))?;
-        let json = serde_json::to_string(&event)
-            .map_err(|e| EventStoreError::SerializationError(format!("Failed to serialize event: {e}")))?;
+            .map_err(|e| {
+                EventStoreError::IoError(format!("Failed to open file for append: {e}"))
+            })?;
+        let json = serde_json::to_string(&event).map_err(|e| {
+            EventStoreError::SerializationError(format!("Failed to serialize event: {e}"))
+        })?;
         file.write_all(json.as_bytes())
             .and_then(|_| file.write_all(b"\n"))
             .and_then(|_| file.flush())
@@ -99,17 +115,24 @@ impl EventStore for FileEventStore {
         let mut events = Vec::new();
         let mut prev_hash: Option<String> = None;
         for (idx, line) in reader.lines().enumerate() {
-            let line = line.map_err(|e| EventStoreError::IoError(format!("Failed to read line {idx}: {e}")))?;
-            let event: EventRecord = serde_json::from_str(&line)
-                .map_err(|e| EventStoreError::Corruption(format!("Corrupt event at line {idx}: {e}")))?;
+            let line = line
+                .map_err(|e| EventStoreError::IoError(format!("Failed to read line {idx}: {e}")))?;
+            let event: EventRecord = serde_json::from_str(&line).map_err(|e| {
+                EventStoreError::Corruption(format!("Corrupt event at line {idx}: {e}"))
+            })?;
             // Check prev_hash matches
             if event.prev_hash != prev_hash {
-                return Err(EventStoreError::Corruption(format!("Hash chain broken at line {idx}: prev_hash mismatch")));
+                return Err(EventStoreError::Corruption(format!(
+                    "Hash chain broken at line {idx}: prev_hash mismatch"
+                )));
             }
             // Check hash is correct
             let expected_hash = compute_event_hash(&event);
             if event.hash != expected_hash {
-                return Err(EventStoreError::Corruption(format!("Hash mismatch at line {idx}: expected {expected_hash}, found {}", event.hash)));
+                return Err(EventStoreError::Corruption(format!(
+                    "Hash mismatch at line {idx}: expected {expected_hash}, found {}",
+                    event.hash
+                )));
             }
             prev_hash = Some(event.hash.clone());
             events.push(event);
@@ -144,6 +167,9 @@ use uuid::Uuid;
 pub enum EventKind {
     HealthCheck,
     AuthorizationRequestReceived,
+    AuthChallengeIssued,
+    AuthChallengeConsumed,
+    CapabilityIssued,
     // Add more event kinds as needed in future steps
 }
 

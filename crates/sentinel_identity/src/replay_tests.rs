@@ -1,8 +1,8 @@
 //! Adversarial tests for persistent replay protection and event-sourced identity
 
 use crate::*;
-use sentinel_core::*;
 use chrono::Utc;
+use sentinel_core::*;
 use uuid::Uuid;
 
 #[test]
@@ -21,7 +21,7 @@ fn duplicate_nonce_detection_in_reducer() {
         IdentityEvent::KeyRegistered(KeyRegistered {
             actor_id,
             key_id,
-            public_key: vec![1,2,3,4],
+            public_key: vec![1, 2, 3, 4],
             timestamp_utc: now,
         }),
         IdentityEvent::NonceConsumed(NonceConsumed {
