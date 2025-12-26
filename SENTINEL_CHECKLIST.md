@@ -9,6 +9,8 @@ This checklist is derived from the full improvement suggestions and is designed 
 - [x] `crates/sentinel_api/src/main.rs` hard-reset to minimal Phase-1 file (cleaned of merge artifacts and hidden bytes) — 2025-12-25
 - [x] `cargo build -p sentinel_api` completed after cleanup (warnings only) — 2025-12-25
  - [x] Phase 2: runtime boot + `/health` handler implemented and builds — 2025-12-25
+ - [x] Commit code for Phase 2/3 handlers and integration tests — 2025-12-25
+ - [x] Integration test (genesis → challenge → login) passing locally — 2025-12-25
 
 
 

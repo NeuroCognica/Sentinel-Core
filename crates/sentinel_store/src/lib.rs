@@ -166,9 +166,11 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventKind {
     HealthCheck,
+    Identity,
     AuthorizationRequestReceived,
     AuthChallengeIssued,
     AuthChallengeConsumed,
+    NonceConsumed,
     CapabilityIssued,
     // Add more event kinds as needed in future steps
 }

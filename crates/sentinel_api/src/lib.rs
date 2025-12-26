@@ -84,7 +84,7 @@ pub async fn genesis(
         event_id: Uuid::new_v4(),
         timestamp_utc: now,
         actor: actor_id.to_string(),
-        kind: EventKind::CapabilityIssued,
+        kind: EventKind::Identity,
         payload: json!(serde_json::to_value(IdentityEvent::ActorRegistered(ActorRegistered {
             actor_id,
             human_handle: req.get("human_handle").and_then(|v| v.as_str()).map(|s| s.to_string()),
@@ -99,7 +99,7 @@ pub async fn genesis(
         event_id: Uuid::new_v4(),
         timestamp_utc: now,
         actor: actor_id.to_string(),
-        kind: EventKind::CapabilityIssued,
+        kind: EventKind::Identity,
         payload: json!(serde_json::to_value(IdentityEvent::KeyRegistered(KeyRegistered {
             actor_id,
             key_id,
@@ -115,7 +115,7 @@ pub async fn genesis(
         event_id: Uuid::new_v4(),
         timestamp_utc: now,
         actor: actor_id.to_string(),
-        kind: EventKind::CapabilityIssued,
+        kind: EventKind::Identity,
         payload: json!(serde_json::to_value(IdentityEvent::GenesisCompleted(GenesisCompleted {
             completed_at: now,
             admin_actor_id: actor_id,
@@ -317,7 +317,7 @@ pub async fn auth_login(
         event_id: Uuid::new_v4(),
         timestamp_utc: Utc::now(),
         actor: envelope.actor_id.to_string(),
-        kind: EventKind::AuthorizationRequestReceived,
+        kind: EventKind::NonceConsumed,
         payload: json!(serde_json::to_value(IdentityEvent::NonceConsumed(NonceConsumed {
             actor_id: envelope.actor_id,
             key_id: envelope.key_id,
