@@ -1,0 +1,19 @@
+%% Sequence diagram: challenge → login → whoami → logout
+sequenceDiagram
+    participant Client
+    participant API
+    participant Ledger
+    Client->>API: /auth/challenge
+    API->>Ledger: log ChallengeRequested
+    API-->>Client: challenge
+    Client->>API: /auth/login (envelope, challenge)
+    API->>Ledger: log AuthorizationRequestReceived
+    API->>Ledger: log NonceConsumed
+    API->>Ledger: log CapabilityIssued
+    API-->>Client: session capability
+    Client->>API: /whoami (capability)
+    API->>Ledger: log CapabilityChecked
+    API-->>Client: actor_id, key_id, TTL
+    Client->>API: /auth/logout (capability)
+    API->>Ledger: log CapabilityRevoked
+    API-->>Client: logout confirmation

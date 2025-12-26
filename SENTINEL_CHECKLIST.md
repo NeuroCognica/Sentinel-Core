@@ -7,25 +7,27 @@ This checklist is derived from the full improvement suggestions and is designed 
 
 ## Immediate (Before Phase 4)
 
-- [ ] **Consolidate Documentation**
-	- [ ] Remove duplicate phase descriptions from README.md
-	- [ ] Split documentation into:
-		- [ ] README.md (overview, quick start, laws)
-		- [ ] ARCHITECTURE.md (technical depth, crate structure, event flow)
-		- [ ] ROADMAP.md (phases 4-8, milestones, deliverables)
-	- [ ] Add visual diagrams:
-		- [ ] Sequence diagram for challenge → login → whoami → logout
-		- [ ] System architecture diagram (crate dependencies, data flow)
-		- [ ] State machine diagram for capability lifecycle
-		- [ ] Use Mermaid or PlantUML for diagrams
 
-- [ ] **Add Threat Model Document**
-	- [ ] Create THREAT_MODEL.md
-	- [ ] List in-scope threats (replay, forgery, theft, tampering, privilege escalation)
-	- [ ] List out-of-scope threats (side-channel, physical, quantum, compiler)
-	- [ ] Map each threat to architectural mitigations
-	- [ ] Document residual risks and accepted tradeoffs
-	- [ ] Reference STRIDE or ATT&CK framework
+- [x] **Consolidate Documentation**
+   - [x] Remove duplicate phase descriptions from README.md
+   - [x] Split documentation into:
+	   - [x] README.md (overview, quick start, laws)
+	   - [x] ARCHITECTURE.md (technical depth, crate structure, event flow)
+	   - [x] ROADMAP.md (phases 4-8, milestones, deliverables)
+   - [x] Add visual diagrams:
+	- [x] Sequence diagram for challenge → login → whoami → logout
+	- [x] System architecture diagram (crate dependencies, data flow)
+	- [x] State machine diagram for capability lifecycle
+	- [x] Use Mermaid or PlantUML for diagrams
+
+
+- [x] **Add Threat Model Document**
+	- [x] Create THREAT_MODEL.md
+	- [x] List in-scope threats (replay, forgery, theft, tampering, privilege escalation)
+	- [x] List out-of-scope threats (side-channel, physical, quantum, compiler)
+	- [x] Map each threat to architectural mitigations
+	- [x] Document residual risks and accepted tradeoffs
+	- [x] Reference STRIDE or ATT&CK framework
 
 - [ ] **Implement Persistent Nonce Registry**
 	- [ ] Ensure all consumed nonces are logged as NonceConsumed events

@@ -1,0 +1,15 @@
+@startuml
+!define RECTANGLE class
+RECTANGLE Client
+RECTANGLE API
+RECTANGLE Ledger
+RECTANGLE Identity
+RECTANGLE Capabilities
+Client --> API : HTTP(S) requests
+API --> Ledger : Append event
+API --> Identity : Verify envelope, key, nonce
+API --> Capabilities : Check/issue/revoke capability
+Ledger --> API : Event replay
+Identity --> API : Identity state (from events)
+Capabilities --> API : Capability state (from events)
+@enduml

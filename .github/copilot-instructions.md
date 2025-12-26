@@ -1,62 +1,76 @@
-Sentinel Core — Copilot & Contributor Instructions
-Purpose
+## Sentinel Core — AI Coding Agent Instructions
 
-This repository implements Sentinel Core, a constitutional security substrate for high-integrity systems (including cognitive frameworks like AURA).
+**Purpose:**
+Sentinel Core is a governed, append-only, event-sourced security substrate for high-integrity systems. All privileged actions are cryptographically attributable, all audit events are immutable, and all failures are visible and queryable. Rust is the canonical source of truth; Python is for UI/orchestration only.
 
-Sentinel is not a feature library, not an LLM agent, and not a UI system.
+---
 
-Sentinel is a gatekeeping authority whose sole mandate is:
+### Constitutional Laws (Non-Negotiable)
+- **FOREVER LAW:** All actions of consequence are immutably logged before completion. No mutable “truth” stores, silent overwrites, or retroactive edits. If an event cannot be logged, the action must fail.
+- **SENTINEL LAW:** No privileged action may bypass the guard boundary. All authority flows through canonical envelopes and verified identity. No hidden admin paths, debug backdoors, or trust-by-assumption.
+- **NEVER BORING LAW:** All failures must be visible, attributable, and queryable. No swallowed errors or ambiguous states. Fail closed, fail loud, fail honestly.
 
-No action of consequence may occur without explicit authorization, cryptographic accountability, and immutable evidence.
+---
 
-Any contribution that violates this mandate is incorrect by definition.
+### Architecture & Major Components
+- **Append-only event ledger:** All system truth is derived from a hash-chained, file-backed event log (`crates/sentinel_store`). No mutable state as truth; all state is rebuilt by replaying events.
+- **Identity & Authority:** All privileged requests use a canonical envelope (`actor_id`, `key_id`, `nonce`, `timestamp_utc`, `payload`, `signature`). Identity lifecycle (registration, key management, nonce consumption) is fully event-sourced (`crates/sentinel_identity`).
+- **Capabilities:** Capabilities are cryptographically signed, time-bounded, scope-limited, and strictly event-sourced (`crates/sentinel_capabilities`).
+- **API:** HTTP interface (`crates/sentinel_api`) enforces guard boundaries and logs all privileged actions as events before any decision.
+- **CLI & UI:** `crates/sentinel_cli` is for admin/dev only (never bypasses Sentinel). `python_ui` is a client harness, never an authority.
 
-Foundational Laws (Non-Negotiable)
+---
 
-All code generated, suggested, or modified in this repository must comply with the following laws.
+### Developer Workflows
+- **Build:** `cargo build` (Rust stable required)
+- **Run API:** `cargo run -p sentinel_api` (serves HTTP on 127.0.0.1:8080)
+- **Python UI Health Check:** `python health_check.py` (requires Python 3.12, see `python_ui/SETUP_VENV.txt`)
+- **Dev envelope generation:** Use `crates/sentinel_identity/src/bin/make_envelope.rs` for generating signed envelopes in dev/test (never ship dev keys to production).
+- **Testing:** All features must be covered by adversarial tests (tamper, replay, signature, revocation, ordering, fail-closed on storage failure). See `crates/sentinel_identity/src/replay_tests.rs` for replay protection tests.
 
-FOREVER LAW
+---
 
-All actions of consequence are recorded immutably before completion.
+### Project-Specific Conventions
+- **No cross-crate shortcuts:** Each crate enforces strict separation (core, store, identity, capabilities, api, cli, python_ui). Never collapse boundaries.
+- **Event ordering:** For privileged requests: verify envelope → append AuthorizationRequestReceived → append NonceConsumed → return decision. If any append fails, the request fails.
+- **No mutable sessions:** All session/capability state is derived from the ledger, never RAM.
+- **No UI/business logic in Sentinel:** Sentinel only authorizes; execution is external.
+- **All authority is event-sourced:** No identity, key, or capability fact may exist outside the ledger.
 
-No mutable “truth” stores
+---
 
-No silent overwrites
+### Key Files & Patterns
+- `crates/sentinel_core/src/lib.rs`: Canonical types, envelope, event, and capability models
+- `crates/sentinel_store/src/lib.rs`: Append-only event store, hash chain, corruption detection
+- `crates/sentinel_identity/src/lib.rs`: Identity lifecycle, key registry, replay protection
+- `crates/sentinel_capabilities/src/lib.rs`: Capability reducer, event-sourced state
+- `crates/sentinel_api/src/main.rs`: HTTP API, guard enforcement, event logging
+- `python_ui/SETUP_VENV.txt`: Python 3.12 setup (strict version)
 
-No retroactive edits
+---
 
-No best-effort logging
+### Integration & External Points
+- **API endpoints:** `/auth/challenge`, `/auth/login`, `/auth/logout`, `/whoami`, `/genesis`, `/health` (see `sentinel_api`)
+- **OpenAPI/Swagger:** Use the provided task to generate OpenAPI spec and host Swagger UI for docs.
+- **Dev/test keys:** Strictly quarantined; never default-on in production.
 
-If an event cannot be logged, the action must fail.
+---
 
-SENTINEL LAW
+### Example: Canonical Envelope (Rust)
+```rust
+pub struct CanonicalEnvelopeAuthorizationRequest {
+	pub actor_id: Uuid,
+	pub key_id: Uuid,
+	pub nonce: Uuid,
+	pub timestamp_utc: DateTime<Utc>,
+	pub payload: AuthorizationRequest,
+	pub signature: Vec<u8>,
+}
+```
 
-No privileged action may bypass the guard boundary.
+---
 
-No hidden admin paths
-
-No “internal” shortcuts
-
-No debug backdoors
-
-No trust-by-assumption
-
-All authority flows through canonical envelopes and verified identity.
-
-NEVER BORING LAW
-
-All failures must be visible, attributable, and queryable.
-
-No swallowed errors
-
-No silent fallbacks
-
-No ambiguous states
-
-Fail closed. Fail loud. Fail honestly.
-
-Architectural Doctrine
-Append-Only Truth
+**This file is constitutional. Do not soften, summarize, or bypass these instructions.**
 
 Sentinel does not store mutable state as truth.
 

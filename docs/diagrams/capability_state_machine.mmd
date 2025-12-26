@@ -1,0 +1,7 @@
+stateDiagram-v2
+    [*] --> Inactive
+    Inactive --> Active: CapabilityIssued
+    Active --> Revoked: CapabilityRevoked
+    Active --> Consumed: CapabilityConsumed
+    Revoked --> [*]
+    Consumed --> [*]
