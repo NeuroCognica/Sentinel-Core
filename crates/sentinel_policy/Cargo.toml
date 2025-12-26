@@ -19,3 +19,4 @@ serde_yaml = { version = "0.9", optional = true }
 
 [dev-dependencies]
 serde_yaml = "0.9"
+proptest = "1.0"
