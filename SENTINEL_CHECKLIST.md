@@ -48,7 +48,7 @@ This checklist is derived from the full improvement suggestions and is designed 
 	- [x] Document replay protection logic and test cases
 
 - [ ] **Create Comprehensive API Documentation**
-	- [ ] Generate OpenAPI 3.0 spec from Rust code (utoipa or similar)
+	- [x] Generate OpenAPI 3.0 spec from Rust code (utoipa or similar)
 	- [ ] Host Swagger UI or ReDoc for interactive docs
 	- [ ] Include example requests/responses for all endpoints
 	- [ ] Document error codes and meanings
