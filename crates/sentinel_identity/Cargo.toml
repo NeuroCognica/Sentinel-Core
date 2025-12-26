@@ -17,3 +17,6 @@ hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 sentinel_store = { path = "../sentinel_store" }
 sentinel_core = { path = "../sentinel_core" }
+
+[dev-dependencies]
+sentinel_api = { path = "../sentinel_api" }

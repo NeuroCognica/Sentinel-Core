@@ -1,5 +1,9 @@
 #[cfg(test)]
 mod replay_tests;
+mod nonce_registry;
+pub use nonce_registry::NonceRegistry;
+mod legacy_nonce;
+pub use legacy_nonce::*;
 use sentinel_store::{EventKind, EventRecord, EventStore, FileEventStore};
 
 /// Load all IdentityEvents from the event log and reduce to current state

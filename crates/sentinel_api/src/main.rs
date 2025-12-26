@@ -19,6 +19,7 @@ async fn main() -> std::io::Result<()> {
             .service(lib::genesis)
             .service(lib::auth_challenge)
             .service(lib::auth_login)
+            .service(lib::policy_evaluate)
     })
     .bind(bind)?
     .run()

@@ -12,8 +12,11 @@ use chrono::Duration;
 use sha2::Sha256;
 use sha2::Digest;
 use ed25519_dalek::PublicKey;
-use sentinel_core::{CanonicalEnvelopeAuthorizationRequest, Capability, CapabilityEvent, CapabilityIssued, NonceConsumed};
+use sentinel_core::{CanonicalEnvelopeAuthorizationRequest, Capability, CapabilityEvent, CapabilityIssued};
 use sentinel_identity::{ActorId, KeyId, SignedEnvelope, SignatureBytes, SignatureAlgorithm, Keystore, verify_signature};
+use sentinel_policy::{Policy, PolicyInput, make_policy_evaluated};
+use sentinel_policy::event::Decision as PolicyDecision;
+pub mod middleware;
 
 #[get("/health")]
 pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
@@ -310,26 +313,9 @@ pub async fn auth_login(
         return HttpResponse::InternalServerError().body(format!("challenge consume append failed: {e:?}"));
     }
 
-    // 6) Append NonceConsumed IdentityEvent (NonceConsumed contains envelope digest)
-    let digest = sha2::Sha256::digest(serde_json::to_vec(&envelope).expect("canonical serialization"));
-    let digest_hex = hex::encode(digest);
-    let nonce_event = EventRecord {
-        event_id: Uuid::new_v4(),
-        timestamp_utc: Utc::now(),
-        actor: envelope.actor_id.to_string(),
-        kind: EventKind::NonceConsumed,
-        payload: json!(serde_json::to_value(IdentityEvent::NonceConsumed(NonceConsumed {
-            actor_id: envelope.actor_id,
-            key_id: envelope.key_id,
-            nonce: envelope.nonce,
-            envelope_digest: digest_hex.clone(),
-            consumed_at: Utc::now(),
-        })).unwrap()),
-        prev_hash: None,
-        hash: "UNHASHED".to_string(),
-    };
-    if let Err(e) = store_guard.append(nonce_event) {
-        return HttpResponse::InternalServerError().body(format!("nonce append failed: {e:?}"));
+    // 6) Validate + append NonceConsumed via shared middleware (fail-closed)
+    if let Err(e) = middleware::nonce_middleware::check_and_append_nonce(&*store, &envelope) {
+        return HttpResponse::InternalServerError().body(format!("nonce append failed: {e}"));
     }
 
     // 7) Issue session capability (signed by service key)
@@ -373,3 +359,74 @@ pub async fn auth_login(
 
     HttpResponse::Ok().json(cap)
 }
+
+
+    #[post("/policy/evaluate")]
+    pub async fn policy_evaluate(
+        store: web::Data<Mutex<FileEventStore>>,
+        req: web::Json<serde_json::Value>,
+    ) -> impl Responder {
+        // 1) Parse input: require either `policy` (full object) or reject reference-only (no registry exists yet)
+        let body = req.into_inner();
+
+        let policy_value = body.get("policy");
+        let policy_digest_ref = body.get("policy_digest").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let input_value = body.get("input");
+
+        if input_value.is_none() {
+            return HttpResponse::BadRequest().body("missing 'input' field");
+        }
+
+        // If caller provided only a digest reference, fail: no policy registry exists (no hidden lookup)
+        if policy_value.is_none() && policy_digest_ref.is_some() {
+            return HttpResponse::BadRequest().body("policy_digest reference unsupported: provide full policy object (no registry available)");
+        }
+
+        if policy_value.is_none() {
+            return HttpResponse::BadRequest().body("missing 'policy' field; explicit policy required");
+        }
+
+        // Deserialize policy and input
+        let policy: Policy = match serde_json::from_value(policy_value.unwrap().clone()) {
+            Ok(p) => p,
+            Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
+        };
+        let input: PolicyInput = match serde_json::from_value(input_value.unwrap().clone()) {
+            Ok(i) => i,
+            Err(e) => return HttpResponse::BadRequest().body(format!("invalid input object: {e}")),
+        };
+
+        // 2) Build PolicyEvaluated payload (pure)
+        let now = Utc::now();
+        // evaluator version is locked to v0 for this frozen schema
+        let evaluator_version = "v0";
+        let pe = make_policy_evaluated(&policy, &input, evaluator_version, now);
+
+        // 3) Append PolicyEvaluated event BEFORE responding (fail-closed)
+        let mut store_guard = store.lock().unwrap();
+        let event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: now,
+            actor: "policy_evaluator".to_string(),
+            kind: EventKind::PolicyEvaluated,
+            payload: serde_json::to_value(&pe).expect("policy evaluated serialization"),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+
+        if let Err(e) = store_guard.append(event) {
+            return HttpResponse::InternalServerError().body(format!("policy evaluated event append failed: {e:?}"));
+        }
+
+        // 4) Return explanation (read-only)
+        HttpResponse::Ok().json(json!({
+            "decision": match pe.decision {
+                PolicyDecision::Allow => "Allow",
+                PolicyDecision::Deny => "Deny",
+            },
+            "policy_digest": pe.policy_digest,
+            "input_digest": pe.input_digest,
+            "rationale": pe.rationale,
+            "matched_statement_index": pe.matched_statement_index,
+        }))
+    }

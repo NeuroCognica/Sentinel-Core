@@ -23,6 +23,7 @@ ed25519-dalek = { version = "1", features = ["serde"] }
 
 sentinel_core = { path = "../sentinel_core" }
 sentinel_identity = { path = "../sentinel_identity" }
+sentinel_policy = { path = "../sentinel_policy" }
 
 
 [features]
