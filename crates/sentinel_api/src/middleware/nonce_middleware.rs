@@ -55,7 +55,16 @@ pub fn check_and_append_nonce(
 
     // Use synchronous append to ensure durability before returning
     guard
-        .append_with_sync(event, true)
+        .append_with_sync(event.clone(), true)
         .map_err(|e| format!("append failed: {e:?}"))?;
+
+    // Update process-local registry cache (non-authoritative, ledger is canonical)
+    // best-effort: do not fail the request if registry update fails
+    if let Ok(payload) = serde_json::from_value::<IdentityEvent>(event.payload.clone()) {
+        if let IdentityEvent::NonceConsumed(nc) = payload {
+            // offset is unknown here; pass None
+            let _ = sentinel_identity::GLOBAL_NONCE_REGISTRY.observe_consumed(&nc, None);
+        }
+    }
     Ok(())
 }

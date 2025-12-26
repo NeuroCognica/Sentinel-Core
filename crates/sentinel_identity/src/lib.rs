@@ -2,6 +2,7 @@
 mod replay_tests;
 mod nonce_registry;
 pub use nonce_registry::NonceRegistry;
+pub use nonce_registry::GLOBAL_NONCE_REGISTRY;
 mod legacy_nonce;
 pub use legacy_nonce::*;
 use sentinel_store::{EventKind, EventRecord, EventStore, FileEventStore};

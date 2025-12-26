@@ -128,148 +128,43 @@ key registration
 key revocation
 
 key rotation
-
-nonce consumption (replay protection)
-
-No identity fact may exist outside the ledger.
-
-Key Management Rules
-
-Multiple keys per actor are allowed.
-
-Keys have explicit status: Active or Revoked.
-
-Revoked keys must never verify successfully.
-
-Key reuse without explicit rotation is forbidden.
-
-Dev/test keys must be quarantined behind explicit flags and never default-on.
-
-Canonical Envelope (Mandatory)
-
-All privileged requests must use a canonical, deterministic envelope.
-
-An envelope minimally includes:
-
-actor_id
-
-key_id
-
-nonce
-
-timestamp_utc
-
-payload
-
-signature
-
-Rules:
-
-Signature covers all unsigned fields.
-
-Serialization is deterministic.
-
-Missing or malformed envelope → reject.
-
-Invalid signature → reject.
-
-Stale timestamp → reject.
-
-Replayed nonce → reject.
-
-No envelope → no authority.
-
-Replay Protection (Persistent)
-
-Replay protection must persist across restarts.
-
-A nonce is considered used only if a corresponding immutable event exists in the ledger.
-
-In-memory caches are allowed only as performance optimizations derived from events.
-
-Event Ordering (Critical)
-
-For valid privileged requests, the following ordering is mandatory:
-
-Verify envelope (signature, freshness, replay)
-
-Append AuthorizationRequestReceived (or equivalent)
-
-Append NonceConsumed
-
-Return decision
-
-If any append fails, the request must fail.
-
-For invalid requests:
-
-Append nothing
-
-Return rejection
-
-Do not pollute the ledger
-
-Testing Doctrine
-
-Tests must be adversarial, not cosmetic.
-
-Minimum expectations for any feature touching authority:
-
-tamper detection tests
-
-replay tests (including restart simulation)
-
-invalid signature tests
-
-revoked key tests
-
-ordering tests (log before respond)
-
-fail-closed behavior on storage failure
-
-A test that “passes” without asserting invariants is insufficient.
-
-What Sentinel Is Not (Do Not Implement Here)
-
-Unless explicitly instructed, Sentinel must not include:
-
-UI state
-
-business logic
-
-LLM reasoning
-
-policy DSLs beyond minimal authorization
-
-mutable user sessions as truth
-
-side-effect execution logic
-
-Sentinel authorizes. Others execute.
-
-Contribution Standard
-
-When generating or modifying code:
-
-Prefer explicitness over convenience.
-
-Prefer rejection over assumption.
-
-Prefer determinism over flexibility.
-
-Prefer evidence over inference.
-
-If you are unsure whether a change violates a law, it does.
-
-Stop and redesign.
-
-Canonical Intent
-
-Sentinel exists to make systems incapable of lying about what happened.
-
-Any code that weakens that guarantee is incorrect, regardless of intent or elegance.
-
-This file is constitutional.
-Do not soften it.
-Do not summarize it.
-Do not bypass it.
+# Sentinel Core — Copilot / AI Agent Instructions (concise)
+
+## Purpose
+Sentinel is an append-only, event-sourced security substrate. Rust is the canonical source of truth; Python is a client/orchestration layer only.
+
+## Quick start
+- Build: `cargo build`
+- Run API: `cargo run -p sentinel_api` (127.0.0.1:8080)
+- Generate OpenAPI: use the VS Code task `Generate OpenAPI Spec` or run `cargo run -p sentinel_api --features openapi > openapi.json`
+- Python health check: `python python_ui/health_check.py` (see `python_ui/SETUP_VENV.txt`)
+
+## Architecture snapshot
+- `crates/sentinel_store`: append-only, hash-chained event ledger (single source of truth).
+- `crates/sentinel_identity`: actor/key lifecycle and replay protection (event-sourced).
+- `crates/sentinel_capabilities`: capability reducer; state derived from events.
+- `crates/sentinel_api`: guard enforcement; emits events before decisions.
+- `crates/sentinel_core`: canonical types (envelope, event, capability).
+
+## Must-follow conventions
+- Immutable audit-first: append events before responding. If append fails, fail the request.
+- Canonical envelope required: `actor_id`, `key_id`, `nonce`, `timestamp_utc`, `payload`, `signature`.
+- Privileged request ordering: verify envelope → append AuthorizationRequestReceived → append NonceConsumed → return decision.
+- No authoritative mutable RAM state: all facts must be reconstructable by replay.
+
+## Where to look (examples/tests)
+- Replay tests: `crates/sentinel_identity/src/replay_tests.rs`
+- API enforcement & OpenAPI: `crates/sentinel_api/src/main.rs` and `crates/sentinel_api/src/openapi.rs`
+- Store implementation: `crates/sentinel_store/src/lib.rs`
+
+## Testing & CI
+- Tests must be adversarial: tamper, replay, invalid signatures, revoked keys, ordering, and fail-closed on storage failure.
+- Use `cargo test`; use the provided tasks for integration/bench and OpenAPI generation.
+
+## Developer cautions
+- Do not add cross-crate shortcuts that bypass guard boundaries.
+- Dev/test keys must be quarantined; never shipped or enabled by default.
+- Sentinel crates authorize only; business execution and UI state belong outside the sentinel crates.
+
+---
+If you want this expanded into a contributor checklist, sequence diagrams for the envelope flow, or a short PR checklist, tell me which to add next.

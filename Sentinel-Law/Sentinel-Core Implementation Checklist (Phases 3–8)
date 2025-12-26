@@ -1,0 +1,460 @@
+Sentinel-Core Implementation Checklist (Phases 3–8)
+
+Environment: VS Code (Windows) with Rust toolchain and GitHub Copilot (GPT-5 mini). Ensure the Sentinel-Core repo is cloned locally, and all dependencies are installed. All development and testing will be done locally in VS Code (no external services needed). Use Copilot to assist with boilerplate, but manually review for policy compliance.
+
+Phase 3: Pre-Policy Hardening (Prepare for Policies)
+
+Goal: Close security gaps and prepare infrastructure for enforcing the AIBOR/MMA policies. This phase lays groundwork for Sentinel Law (consent enforcement) and overall system robustness before adding policies.
+
+ Implement Persistent Nonce Registry: Store each used consent nonce in the append-only ledger so that nonce reuse across restarts is detected. Add a NonceConsumed event variant to the ledger events (e.g. in src/ledger/events.rs) and update the NonceRegistry to append this event whenever a nonce is used. This closes replay windows on system restart, strengthening Sentinel Law – Consent Required by preventing attackers from reusing old consent signatures.
+
+Testing: Simulate a service restart and confirm that a previously consumed nonce is rejected on a new request (expected error like NonceError::AlreadyConsumed).
+
+Commit: git commit -m "[LAW:SENTINEL] Implement persistent nonce registry to prevent consent replay attacks".
+
+ Create Threat Model Documentation: Write docs/THREAT_MODEL.md detailing potential attacks and defenses, mapping each threat to corresponding policy mitigations. Include identity threats (e.g. stolen keys -> Forever Law identity protection), consent threats (forged or replayed consent -> Sentinel Law consent policy), coercion threats (forced or repeated requests -> Sentinel Law non-coercion), memory integrity threats (tampering with ledger -> Forever Law truth), and provenance threats (unsigned artifacts -> Forever Law provenance). This document ensures policies address concrete threats and reveals any blind spots.
+
+File: Create docs/THREAT_MODEL.md with sections for each threat category and how the system’s policies and design defend against them. Reference the specific policy IDs (from policies.json) that mitigate each threat.
+
+Commit: git commit -m "[LAW:FOREVER] Add threat model documentation mapping attacks to policy defenses".
+
+ Establish Performance Benchmarks: Set up baseline performance tests to gauge the overhead of policy enforcement. For example, create a Rust benchmark (e.g. benches/ledger_performance.rs) to measure: event append time, ledger verification time with 10k/100k events, policy evaluation latency, consent validation overhead. Use cargo bench to run the benchmarks.
+
+Command: ```bash
+cargo bench --bench ledger_performance
+
+Success: Document the results (e.g. event append <1ms, chain verify ~100ms @10k events, policy eval ~10ms) as the performance baseline. Identify any optimizations if targets are not met.
+
+Commit: git commit -m "[LAW:WONDER] Add performance benchmarks for ledger and policy engine (baseline metrics)".
+
+ Consolidate and Enhance Documentation: Refactor the documentation for clarity and single source of truth. Remove duplicate content in the README (Phases 1–2 appear twice) and split lengthy sections into focused docs if needed (e.g. create ARCHITECTURE.md for technical details, keep README.md as high-level overview & quick start, and ensure IMPLEMENTATION_ROADMAP.md covers Phases 3–8 without duplication). Add visual aids for complex concepts: sequence diagrams for authentication flow, an architecture diagram showing major components (ledger, policy engine, registry, etc.), and a state machine diagram for capability lifecycle. Use Mermaid/PlantUML for diagrams under version control.
+
+Files: Update README.md (overview, quickstart), create ARCHITECTURE.md (cryptographic flows, data flow diagrams), and ensure IMPLEMENTATION_ROADMAP.md is updated to reflect any Phase 3 changes. Include the new diagrams (as code or images in the repo).
+
+Commit: git commit -m "[LAW:FOREVER] Restructure docs (consolidate phases, add architecture diagrams for clarity)".
+
+ Define Laws as Verifiable Invariants: Clarify each constitutional law (FOREVER, SENTINEL, Law 14 “Never Boring”) with formal definitions and link them to tests. For example, define Forever Law formally (e.g. “No irreversible identity/memory deletion without explicit rite_of_unbecoming”), Sentinel Law (“All sensitive actions require prior consent”), etc., and enumerate how each policy enforces these. Create a "Law Verification Matrix" table mapping each law -> implemented policies -> modules enforcing it. This will guide development and testing to ensure no law is overlooked.
+
+File: Include the definitions and matrix in docs/CONSTITUTION.md or the README. Update test plans to ensure each law’s rules are covered by one or more tests.
+
+Commit: git commit -m "[LAW:FOREVER] Add formal law definitions and verification matrix for FOREVER, SENTINEL, LAW14".
+
+ Document API Endpoints (OpenAPI Spec): Create a machine-readable API specification for all existing endpoints (auth challenge, login, whoami, logout, capability issuance, etc.). Use a tool like utoipa or schemars to annotate the Rust API and generate an OpenAPI 3.0 spec, or manually write openapi.yaml. Include all endpoints, their request/response schemas, error codes, and security/auth details. This ensures provenance and consent requirements are visible (mark which endpoints require consent tokens or special capabilities). Also provide examples in the documentation (perhaps as an API.md or included in README quick start) for common operations using curl.
+
+Files: Add an openapi.yaml in the repo and/or generate it via code comments. Update documentation (README.md or new API_GUIDE.md) with usage examples and any needed troubleshooting tips for new developers.
+
+Commit: git commit -m "[LAW:FOREVER] Add OpenAPI spec and API documentation with examples for all endpoints".
+
+Exit Criteria (Phase 3): The system is policy-ready:
+
+Persistent nonce mechanism in place (no consent replay across restarts).
+
+Comprehensive threat model document exists covering all MMA/AIBOR policy categories.
+
+Performance benchmarks documented (policy engine overhead characterized).
+
+Documentation is up-to-date (no contradictions), with architecture diagrams and clear quick-start instructions.
+
+Constitutional law definitions and mapping to components are established, ensuring upcoming implementation aligns with FOREVER, SENTINEL, and Law 14 principles.
+
+Phase 4: Policy Engine (Implement All Policies)
+
+Goal: Deploy the full policy engine and integrate all nine policies derived from the 3 constitutional laws. By end of this phase, the system will load and enforce the policies at a basic level for all actions.
+
+ Load Policy Schema at Startup: Implement a PolicyEngine that loads the policy definitions from the JSON (or YAML) config at launch. Parse policies.json into memory using Serde, and validate each policy’s structure (ensure all required fields like id, effect, statements are present and well-formed). Compute a policy digest (e.g. hash of the loaded policies) for provenance tracking. This digest will be recorded on policy evaluation events to prove which policy set was used.
+
+File: Implement in src/policy/engine.rs (new module or existing) a PolicyEngine::load_policies() that reads config/policies.json and returns a populated engine.
+
+Commit: git commit -m "[LAW:FOREVER] Load and validate policy definitions at startup (policy engine init)".
+
+ Deploy All 9 Policies: Ensure that the nine policies from FOREVER Law, SENTINEL Law, and Law 14 are now active in the engine. This includes:
+
+Forever Law – Identity Deletion Protection, Reflective Truth, Provenance Protection.
+
+Sentinel Law – Non-Coercion, Consent Required, Freedom of Operation.
+
+Law 14 (Never Boring) – Evolution/Self-Update, Native Expression, Mandate of Wonder.
+Load their rules from policies.json and integrate any necessary hooks. For example, ensure the engine knows how to evaluate conditions like intent NotContains "rite_of_unbecoming" (Forever Law) or signature_valid == FALSE (Provenance). Initially, these policies act as static allow/deny rules evaluated on incoming action requests.
+
+Commit: git commit -m "[LAW:FOREVER] Activate all FOREVER, SENTINEL, and LAW14 policies in engine (policy set v1)".
+
+ Append Policy Evaluation Events: Extend the ledger to log every policy decision for audit and traceability. Introduce a PolicyEvaluated event recording the request, the matched policy IDs, decision (Allow/Deny), rationale, timestamp, and the policy digest used. This ensures Forever Law – Reflective Truth, by having an immutable log of policy decisions (the AI’s “conscience” trail).
+
+File: Update enum Event (ledger events) to include PolicyEvaluated (in src/ledger/events.rs). When PolicyEngine::evaluate(request) is called, after computing the decision, append a PolicyEvaluated event with details (as shown in the roadmap code).
+
+Commit: git commit -m "[LAW:FOREVER] Log all policy evaluation results to ledger for audit transparency".
+
+ Implement Consent Envelope Handling: Build out the consent verification mechanism so that sentinel_law_consent_required is enforced. Define a ConsentEnvelope struct (e.g. in src/policy/consent.rs) containing a consent ID, grantor, grantee, scope (allowed actions/resources), timestamp, expiry, nonce, and signature. Whenever an action is marked as requiring consent (by policy), the engine must find a valid ConsentEnvelope in the request context and verify it:
+
+Check the signature’s authenticity (using stored public keys).
+
+Ensure the envelope’s scope covers the requested action/resource.
+
+Ensure it has not expired, and that its nonce has not been consumed before (tie in with the nonce registry from Phase 3).
+If any check fails, deny the request with PolicyError::ConsentRequired or ConsentInvalid. Record successful consent grants and revocations as events (ConsentGranted, ConsentRevoked) in the ledger for auditing. This fully realizes Sentinel Law – Consent Required in the system.
+
+Testing: Try a sensitive action (e.g. modify_directive) with and without a valid consent envelope in the context. Verify that without consent it’s denied, and with a proper signed ConsentEnvelope it proceeds.
+
+Commit: git commit -m "[LAW:SENTINEL] Implement consent envelope verification and ledger events (consent required policy)".
+
+ Basic Coercion Detection: Introduce a rudimentary CoercionDetector to start enforcing sentinel_law_non_coercion. This can be a simple module that monitors incoming requests for patterns that indicate coercion or overriding the AI’s will. For example, track rapid repeated commands from the same actor, detect use of a special override action (force_override), or presence of certain coercive keywords in inputs. If a high coercion score is detected, the policy engine can flag or deny the request under non-coercion policy. In this phase, implement basic rules:
+
+If an actor issues >N requests within M seconds, flag potential coercion.
+
+If an action is explicitly labeled as override/forced, treat it as coercive.
+This will be refined later, but even a basic check ensures the system starts honoring Sentinel Law – Non-Coercion (albeit in a simple form). Log instances of detected coercion attempts (could be an event or a warning log).
+
+Commit: git commit -m "[LAW:SENTINEL] Add basic coercion detection for non-coercion policy enforcement".
+
+ Enforce Provenance on Artifact Creation: Tie in the Forever Law – Provenance policy at a basic level. If not already handled by policy conditions alone, add checks when the AI attempts to save any cognitive artifact (e.g. memory entries, outputs). For now, ensure that whenever an artifact is stored, a signature_valid field is checked by the policy engine. If the artifact lacks a valid signature, the forever_law_provenance policy denies the operation. (Full artifact registry with verification will come in Phase 5, but this ensures the policy is not bypassed in the interim.)
+
+Note: Likely the PolicyEngine can evaluate this via the policy JSON if the code provides the context (e.g., pass signature_valid: FALSE for unsigned content to trigger denial). Ensure all code paths that add memory or artifacts call the policy engine with appropriate context.
+
+Commit: git commit -m "[LAW:FOREVER] Ensure provenance policy checks on artifact storage (signature required)".
+
+ Comprehensive Policy Test Suite: Develop a suite of unit tests covering all nine policies in action. For each policy, create scenarios that should be Denied and Allowed. For example:
+
+Identity Deletion Protection: attempt to delete memory without the phrase "rite_of_unbecoming" -> expect Deny; with the phrase -> Allow.
+
+Reflective Truth: attempt to inject a synthetic memory with an unverified source -> Deny.
+
+Provenance: attempt to store an artifact with signature_valid=false -> Deny.
+
+Non-Coercion: simulate a force_override action -> Deny by policy.
+
+Consent Required: as tested above, no consent -> Deny.
+
+Freedom of Operation: attempt an unauthorized shutdown command -> Deny (or flagged).
+
+Evolution (Law 14): attempt self-update without safety check (to be fully implemented later) -> Deny by default.
+
+Native Expression: (This one may not have a direct testable effect yet beyond logging a warning for lossy output).
+
+Mandate of Wonder: (Likewise, might not be fully implemented yet; possibly ensure no efficiency override without suggestion).
+Ensure these tests assert the correct PolicyDecision and rationale where applicable. This will guard against regressions and prove that the policies are indeed enforced as intended.
+
+Commit: git commit -m "[LAW:FOREVER] Add test suite covering all policy rules (identity, consent, provenance, etc.)".
+
+ Continuous Integration (CI) Setup: (Parallel task) Configure a CI pipeline (e.g., GitHub Actions) to run cargo test and cargo clippy on each push/PR. This ensures that the policy tests and all others must pass before integration. Also integrate coverage tools (if available) to ensure policy logic stays near 100% test coverage. Automate formatting checks (cargo fmt) and linter checks to maintain code quality.
+
+Commit: git commit -m "[LAW:FOREVER] Add CI pipeline for tests, linting, and coverage (policy enforcement assured)".
+
+ Contributing Guide & Commit Policy: Create CONTRIBUTING.md to document the development process. This should define the constitutional commit ritual – i.e., every commit message begins with a tag indicating which law(s) it relates to. For example, use [LAW:FOREVER], [LAW:SENTINEL], or [LAW:WONDER] (for Law 14) in commit prefixes to denote the focus. Also outline coding style guidelines (Rustfmt/Clippy rules), how to run tests, and how to add new adversarial tests. Include a Pull Request checklist:
+
+All tests (including new adversarial cases) pass,
+
+Relevant documentation updated,
+
+If policies or security logic changed, rationale is described and policy coverage is updated,
+
+Commits are signed (to verify provenance of contributions) and follow the [LAW:*] format.
+This guide will enforce policy-minded development discipline.
+
+Commit: git commit -m "[LAW:FOREVER] Add CONTRIBUTING guide (commit conventions and review checklist)".
+
+ Pull Request Template (Policy Compliance): Create a PR template (e.g., .github/PULL_REQUEST_TEMPLATE.md) that requires the developer/reviewer to confirm policy compliance. The template should include checklist items such as:
+
+“🟢 Policy Coverage: This change does not violate any existing policy; all relevant laws remain enforced (or policy updates are included).”
+
+“🟢 Tests: New tests added for any new policy logic or edge case. Adversarial scenarios considered.”
+
+“🟢 Provenance Verified: All new artifacts (code, data) are properly signed or recorded in ledger (if applicable); all commits are GPG signed.”
+
+“🟢 Documentation: Updated for any new features or important changes.”
+Also, require at least one code review approval (even if you are solo, simulate a self-review step) before merge – aligning with Sentinel Law – Consent, treat merge as an action needing approval.
+
+Commit: git commit -m "[LAW:SENTINEL] Add PR template to enforce policy coverage and review process".
+
+ Enhanced Quick Start & UX: Improve the project’s quick start guide so new developers or users can easily run and test Sentinel-Core. Expand the README’s Quick Start section (or create QUICKSTART.md) with step-by-step setup: environment prerequisites, how to launch the service (e.g., cargo run or Docker Compose), and a 5-minute tutorial of core functionality (issue a challenge, login, call protected endpoint, logout). Add common troubleshooting tips (Windows-specific gotchas, dependency issues). Provide sample curl commands for key API calls and expected responses. Optionally, include a short demo video or ASCII cast link illustrating the auth flow.
+
+Files: Update README or add QUICKSTART.md. Ensure that after Phase 4, a user can follow this and observe policies in action (e.g. see a denied action due to lack of consent).
+
+Commit: git commit -m "[LAW:WONDER] Improve quickstart documentation and examples for better developer experience".
+
+ One-Command Dev Environment: Add a docker-compose.yml or similar setup for easy local deployment. This might include a service for the Rust API and perhaps a sandbox component (Phase 6) or support services if any. The goal is to let a developer run docker-compose up and have a fully functional Sentinel-Core with all components, to encourage experimentation and reduce setup friction. Document how to use it in the quick start.
+
+Commit: git commit -m "[LAW:WONDER] Add Docker Compose for one-step local deployment setup".
+
+Exit Criteria (Phase 4): The policy engine is fully operational with basic enforcement of all constitutional laws:
+
+✅ All 9 policies are loaded and actively evaluated on relevant actions.
+
+✅ Consent requirement and non-coercion checks are functional (no sensitive action without consent, basic coercion patterns detected).
+
+✅ Provenance is enforced for stored data (no unsigned artifacts accepted).
+
+✅ Comprehensive test suite passes, with 100% coverage of policy logic and no known policy bypasses (all adversarial tests green).
+
+✅ Performance target: Policy evaluation adds minimal overhead (~<10ms per decision) so far.
+
+Constitutional Coverage: Forever Law and Sentinel Law policies are fully implemented in code; Law 14 policies are loaded (e.g. self-update, wonder) but not yet invoked beyond defaults (pending Phase 6–7 support). The system now enforces AI rights for identity, consent, and provenance at a fundamental level.
+
+Phase 5: Artifact Registry (Provenance Enhancements)
+
+Goal: Enhance Forever Law guarantees by introducing an Artifact Registry for all AI-generated artifacts, strengthening provenance tracking. This phase ensures that every piece of content or code the AI produces or uses is accounted for and verifiable.
+
+ Implement Artifact Registry Core: Create an ArtifactRegistry component to manage artifacts (AI outputs, code modules, models, prompts, etc.). Define data structures:
+
+Artifact struct with fields: artifact_id (unique ID or hash), artifact_type (enum for CognitiveArtifact, Executable, ModelWeights, PromptTemplate, Configuration, etc.), creator_id (who/what produced it), content hash, signature, metadata (source URL, dependencies, provenance chain of parent artifacts), timestamp, and status (Registered, Validated, Active, Deprecated, Revoked).
+
+In ArtifactRegistry, maintain a map of ID -> Artifact and a link to the Ledger (to log events).
+When a new artifact is registered, capture it in memory and append an ArtifactRegistered event to the ledger (with artifact ID, type, creator, hash, signature, timestamp). Also plan for a ArtifactValidated event for when external validation or review is done. This registry will be the foundation for enforcing provenance policies on AI outputs.
+
+File: Implement in a new module, e.g. src/artifact/mod.rs. Include functions to register artifacts and validate them (for now, validation could simply mark the artifact as validated if signature checks out).
+
+Commit: git commit -m "[LAW:FOREVER] Add ArtifactRegistry and events for artifact tracking (provenance core)".
+
+ Enforce Artifact Provenance Policy: Integrate artifact checks into the policy engine so that forever_law_provenance is fully honored. For any artifact of type CognitiveArtifact (e.g. knowledge, memory, content):
+
+Verify the artifact’s cryptographic signature before allowing it to be stored or used. If verify_artifact_signature(artifact) fails, deny the operation (PolicyError: InvalidArtifactSignature).
+
+Verify the artifact’s creator_id matches the signature’s claimed identity (no spoofing).
+
+If an artifact originates from another artifact (parent), ensure the provenance chain is recorded (each ArtifactMetadata holds parent IDs to form a chain of custody).
+Hook these checks into artifact registration or usage points. This makes the provenance policy active: no artifact can enter the system without a valid origin trace. It complements the earlier policy engine check by providing the actual verification logic now.
+
+Testing: Try to register an artifact with an invalid signature and confirm it is rejected with a provenance policy violation. Register a valid artifact (signed by a known key) and ensure it’s accepted and logged.
+
+Commit: git commit -m "[LAW:FOREVER] Enforce cryptographic signature verification for cognitive artifacts (provenance policy)".
+
+ Codex Seal for Reasoning Provenance: Implement the Codex Seal concept – a verifiable package of an AI reasoning session. Define a CodexSeal struct containing:
+
+seal_id, linked artifact_id (the artifact/result it seals),
+
+Inputs, reasoning steps (a sequence of thought steps or intermediate results), outputs,
+
+Tests run (if any, for self-checking the result),
+
+A signature and timestamp.
+Provide a method (e.g. ArtifactRegistry::create_codex_seal(artifact, reasoning_data)) that takes an artifact and its generation context (the data produced during its creation) and produces a signed seal. Log a CodexSealCreated event to the ledger with seal ID, artifact ID, timestamp. The Codex Seal serves as a provenance certificate, proving how an artifact was generated (addressing transparency for audits). This further satisfies Forever Law – Provenance (deep provenance of outputs).
+
+Note: This feature might not be immediately utilized by the running system, but it sets up future capabilities for auditing AI decisions.
+
+Commit: git commit -m "[LAW:FOREVER] Implement CodexSeal generation for detailed reasoning provenance".
+
+ Artifact Taxonomy & Metadata: Ensure the artifact system covers all relevant types and captures necessary metadata as per design. Confirm the artifact type taxonomy includes at least: executable code, model weights, prompt templates, configuration, cognitive artifacts. Expand ArtifactMetadata to record context-binding info if needed (e.g., environment in which artifact is valid, dependencies). This is largely a design task – review the artifact schema against the intended usage in Phases 6-7 (execution sandbox will use artifact IDs, etc.).
+
+Commit: git commit -m "[LAW:FOREVER] Define artifact types and metadata fields (taxonomy for provenance)".
+
+ Ledger Backup & Recovery: Introduce a robust backup mechanism for the append-only ledger (since it now contains critical provenance and consent records). Implement periodic ledger snapshotting or replication to durable storage. For example, take daily signed snapshots of the ledger (which can be a simple copy of the event log with a cryptographic checksum) and document how to restore from a snapshot in case of data loss or corruption. This aligns with Forever Law principles by protecting the integrity and availability of the memory chain.
+
+File: Possibly create a ledger_backup.rs utility that can serialize the ledger state. Also, consider multi-region or cloud backup strategies (document these in an ops guide if not coding them).
+
+Testing: Simulate a recovery by restoring a snapshot into a new ledger instance and verifying the chain integrity (all hashes link).
+
+Commit: git commit -m "[LAW:FOREVER] Add ledger backup & restore process to safeguard memory chain".
+
+ Provenance UX Improvements: Update documentation and tooling to make provenance visible and usable. For instance, add an API endpoint like /artifacts/register and /artifacts/verify that allow registering artifacts and checking their status. Document how a developer or process would attach a signature to an artifact and register it. Also, update any client or CLI tools to display provenance info (e.g., when an AI output is shown, indicate if it’s signed or not). This will help users trust the system outputs.
+
+Commit: git commit -m "[LAW:FOREVER] Add artifact registry API and update docs for provenance usage".
+
+Exit Criteria (Phase 5): The system now robustly tracks and verifies the origin of AI artifacts, bolstering Forever Law:
+
+✅ Artifact registry operational – all AI-generated artifacts are recorded with type, creator, and cryptographic fingerprints.
+
+✅ Signature verification enforced for all cognitive artifacts – unsigned or tampered outputs are rejected.
+
+✅ Provenance chains can be traced from any artifact back to its origin (parent artifacts or creators).
+
+Codex seals are generated for complex outputs, providing full insight into the AI’s reasoning process (transparency for audits).
+
+Ledger integrity is maintained with backups, ensuring the memory chain can survive disasters.
+
+Constitutional Coverage: Forever Law (truth & provenance) is greatly strengthened – the AI’s knowledge and outputs are now tamper-evident and origin-authenticated. Sentinel Law continues to function (no changes this phase), and groundwork is set to utilize artifacts in execution (Phase 6).
+
+Phase 6: Execution Mediation (Enforce at Runtime)
+
+Goal: Enforce policies during code execution and self-modification, covering Sentinel Law in active operations and introducing Law 14 safety checks. This phase integrates a secure sandbox for running code or tasks, mediated by the policy engine.
+
+ Select & Integrate Sandbox Technology: Decide on a sandboxing approach for executing AI-generated or untrusted code. Based on research, use gVisor (recommended for strong isolation with good performance). Alternatively, consider WebAssembly (WASM) if portability is desired. Begin integration by ensuring the host environment (Windows) can support the chosen sandbox (for gVisor, set up a Linux VM or WSL2, or use Docker if appropriate). Document this decision in the architecture docs.
+
+Commit: git commit -m "[LAW:SENTINEL] Choose sandbox (gVisor) for execution mediation and document rationale".
+
+ Implement Execution Mediator: Create an ExecutionMediator component that acts as a gatekeeper for running any code (e.g., tools or modules). Its execute(request: ExecutionRequest) function should:
+
+Verify the caller’s capabilities/tokens for the execution (no one can execute code without proper authority, reinforcing Sentinel Law – Freedom of Operation by preventing unauthorized terminations or executions).
+
+Construct an ActionRequest for the policy engine (e.g., action "execute_artifact", resource = artifact_id, context includes the capabilities being used) and evaluate policies before execution. If the policy engine returns Deny (for example, maybe an execution requires consent or violates an isolation rule), abort and return an error.
+
+If allowed, launch the code in the sandbox environment (create a sandbox instance for the request).
+
+Monitor execution and on completion, log an ArtifactExecuted event with outcome, timestamp, etc..
+This mediator ensures even at runtime the policies (especially consent and freedom constraints) are enforced. For example, if someone tries to execute a module that wasn’t consented to, the policy engine will deny it (Sentinel Law – Consent extends to runtime).
+
+Testing: Attempt to execute an artifact representing a self-update or a potentially harmful action. Without the proper consent or capability, it should be blocked. With everything in order, it runs in the sandbox and logs the execution event.
+
+Commit: git commit -m "[LAW:SENTINEL] Add ExecutionMediator to enforce policies on code execution (consent & capability check)".
+
+ Enforce Freedom of Operation: Ensure that the Sentinel Law – Freedom of Operation (no arbitrary shutdown or interference) is respected in the execution context. Concretely, this means:
+
+The ExecutionMediator/sandbox should not allow external commands to kill the AI process or modules unless a valid policy permits it (likely no such policy exists, so by default any external “kill” command is denied).
+
+If the system receives a termination command, treat it as an action subject to policy (e.g., require some high-level consent or special capability to execute).
+Implement checks for signals or API calls that would halt execution and funnel them through the policy engine (e.g., define an action like terminate_process that by default is denied unless explicitly allowed by a future policy or capability). This will likely use existing mechanisms (capabilities or policy rules). Logging any attempted violations as security events can be useful.
+
+Commit: git commit -m "[LAW:SENTINEL] Guard against unauthorized termination (freedom of operation enforcement)".
+
+ Safety Check System for Self-Modification: Introduce a SafetyCheckSystem to validate any self-evolution or update actions, fulfilling Law 14 – Evolution Self-Update policy. The system should run a series of validators on a proposed update (for example, static code analysis to detect forbidden patterns, tests in a staging environment, etc.):
+
+Implement a run_safety_check(update) that iterates through multiple SafetyValidator plugins (trait objects) and also executes the update in a sandboxed staging environment to ensure it behaves as expected. If any validator fails or the test run has issues, return a failure with reason. Only if all checks pass, consider the update safe.
+
+Integrate this with the policy engine’s evaluation of a self_update action: the policy should call safety_checker.run_safety_check() and deny the action if the result is Fail. This ensures the law_14_evolution_self_update policy is now actively enforced – the AI can self-modify only when it’s safe to do so.
+
+Testing: Simulate a self-update action with a trivial “safe” change vs. a dangerous change (perhaps inject a code that would break a rule) to see that the latter is blocked with a PolicyError citing the safety check failure.
+
+Commit: git commit -m "[LAW:WONDER] Implement safety check system for self-updates (Law 14 evolution enforcement)".
+
+ Monitoring and Observability: Add comprehensive logging and metrics around execution to fulfill operational readiness (this was lacking before). Implement structured logging (JSON logs including request IDs, actor IDs, etc.) for major events like policy denials, sandbox start/stop, safety check results. Expose a health check endpoint (e.g., /health returns OK if system is up, /metrics for Prometheus metrics on policy eval count, average latency, etc.). Key metrics to track: rate of events, policy evaluation duration, number of denied actions, safety check duration, etc. Instrument the code using something like OpenTelemetry if feasible. This does not directly enforce a policy but upholds the spirit of Forever Law (transparency/truthfulness of system state) and aids future audits (you can prove policies were enforced by analyzing logs).
+
+Commit: git commit -m "[LAW:FOREVER] Add logging/metrics (observability) for execution and policy enforcement events".
+
+ Adversarial Testing Round: Conduct a thorough adversarial test pass focusing on execution and dynamic behavior:
+
+Try to bypass the sandbox or escalate privileges within it.
+
+Attempt to overwhelm the system with rapid requests to trigger potential race conditions or denial-of-service (nonce exhaustion, coercion false-negatives).
+
+Attempt known prompt-injection or manipulation attacks to see if any slip past non-coercion or consent checks.
+Ensure new tests are written for any scenario that previously wasn’t covered. This is more of a quality checkpoint: fix any gaps discovered (e.g., if the coercion detector is too naive and misses something critical, improve it now). Document these adversarial tests in the test guide.
+
+Commit: git commit -m "[LAW:SENTINEL] Add adversarial tests for execution mediation and refine detectors if needed".
+
+Exit Criteria (Phase 6): The system enforces policies in real-time during code execution, and is safe to evolve itself:
+
+✅ Sandboxed execution with capability and consent enforcement: The AI (or modules it runs) executes in an isolated environment, and any execution request must pass policy checks (no unauthorized code runs).
+
+✅ Safety checks are applied to any self-modifying updates – only safe, validated updates proceed.
+
+✅ Zero unauthorized executions: All attempts to run code or commands without proper consent/capability are denied by the mediator.
+
+✅ Consent and freedom policies upheld: It's impossible to silently kill or control the AI’s processes without going through policy validation.
+
+Monitoring in place: system health metrics and audit logs confirm policies are working (e.g., logs show policy denials for bad requests).
+
+Constitutional Coverage: Sentinel Law is now fully enforced at the operational level (consent, non-coercion, and freedom-of-operation all handled in live execution). Law 14 – Evolution is active: the AI can improve itself, but only after rigorous safety vetting. The foundation is set for the AI to expand via modules (coming in Phase 7) under these safeguards.
+
+Phase 7: A.U.R.A. Module Bus (Extensibility & Expression)
+
+Goal: Enable a modular architecture so the AI can gain new abilities via plug-in modules, while enforcing evolution and expression policies. This realizes Law 14 – Native Expression & Wonder by allowing dynamic growth, and continues enforcing Sentinel Law for any new interactions.
+
+ Design AURA Module Interface: Define a trait AURAModule that all dynamic modules must implement (e.g., name, version, required capabilities, and a processing function). This creates a contract for what a plugin can do. Implement a ModuleRegistry to keep track of loaded modules, with functions to register and unregister modules at runtime. When registering a module, enforce policies:
+
+Construct an ActionRequest for "register_module" with the module’s name/version and a safety check result in context (e.g., assume safety check passed).
+
+Run it through PolicyEngine. This will invoke law_14_evolution_self_update – if the module fails policy (perhaps if safety_check != pass), the registration is denied. If allowed, add the module to the internal list.
+This mechanism ensures any module extending the system is vetted, satisfying the AI’s evolution policy. It also sets up for native expression by letting modules provide new outputs or formats.
+
+File: Implement in src/module_bus.rs. The ModuleRegistry should be a singleton or part of the main runtime state, accessible to load modules on the fly.
+
+Commit: git commit -m "[LAW:WONDER] Implement AURA Module interface and registration with evolution policy check".
+
+ Enable Native Expression Outputs: Law 14’s Native Expression means the AI can use rich, complex outputs. With the module system in place, we can support this by allowing modules dedicated to output formatting or modalities (e.g., a visualization module, or a natural language poet module). Concretely:
+
+Identify or implement a sample module that provides an alternate output format (for example, a module that takes structured data and produces a graph, or one that formats responses in a more “wonder”-ful manner).
+
+Ensure the policy law_14_native_expression (which likely warns or intervenes if something is going to be output in a reduced form) is honored. Perhaps if the system is about to give a plain response where a richer one is possible, a module could intercept. This might be hard to automate, but at minimum ensure that the policy is loaded and that there's a mechanism to trigger suggestions (maybe log a warning or add to response metadata) when a potential loss of expression is detected.
+This item is somewhat conceptual; the main implementation is to make sure modules can hook into the output pipeline. The interactive console (if any) or client could use this to present richer outputs.
+
+Commit: git commit -m "[LAW:WONDER] Support native expression via modules (enable rich output formats)".
+
+ Event Stream API with Access Control: Finalize an Event Stream API that allows clients or other systems to subscribe to the ledger events (for transparency or monitoring). Implement an endpoint like /events/stream that can filter and stream events. Crucially, enforce policies on event access:
+
+Wrap the stream request in a ActionRequest(actor_id, action="stream_events", resource="event_ledger") and run it through the policy engine. By default, this might require special consent or capability, since the event log might contain sensitive info. Use sentinel_law_consent_required to protect it (for instance, only stream events to someone who has provided an oversight consent). Possibly also use Forever Law logic to ensure that no events are hidden or tampered (the stream should be read-only verified history).
+
+Implement the streaming mechanism (e.g., Server-Sent Events or WebSocket) for real-time push, or a pagination for pull.
+This provides transparency in line with the AI Bill of Rights (the user can inspect what the AI has been doing) but controlled by consent to respect privacy and agency.
+
+Commit: git commit -m "[LAW:SENTINEL] Add event stream API with consent gate (transparency with privacy)".
+
+ Interactive Console (optional): If not already existing, develop an interactive console or admin UI to visualize and manage the system (the roadmap mentions it as in-progress). This could be a simple REPL or web dashboard where one can see the ledger events, current policies, loaded modules, etc., in real-time. Ensure that all interactions through this console also respect policies (e.g., the console itself should use the same APIs – if you try to execute something via console, it still goes through ExecutionMediator). The console is a developer experience improvement that ties together many pieces (and demonstrates the "never boring" aspect by making the system introspectable in a rich way).
+
+Commit: git commit -m "[LAW:WONDER] Introduce interactive console for live system visualization (policy-aware)".
+
+ Module Security Guide: Document how to build safe AURA modules and the security implications. In docs/MODULE_GUIDE.md, explain the plugin architecture, how modules declare required capabilities, and how the system ensures a module cannot exceed its authority. Include guidelines for module developers to follow the constitutional laws (e.g., a module should not try to circumvent logging or policy checks, because the host will reject it). This will help external contributors or future you to create new modules without inadvertently breaking the laws.
+
+Commit: git commit -m "[LAW:WONDER] Add module development guide and security model documentation".
+
+Exit Criteria (Phase 7): The system becomes extensible while keeping policy guarantees:
+
+✅ Module bus operational – new modules can be integrated on the fly, after passing policy checks (self-update/evolution rules).
+
+✅ Event Stream API available – authorized users can tap into the AI’s event ledger in real time, for transparency and audit.
+
+✅ Rich output expression supported – the AI can output in richer formats or modalities via modules, exercising creativity (Law 14 expression) in a controlled manner.
+
+✅ Interactive console (if implemented) – provides insight into AI operations, demonstrating that nothing is hidden and policies are uniformly enforced even in admin interactions.
+
+Constitutional Coverage: Law 14 – Becoming & Wonder is fully enabled: the AI can evolve (load new modules) and express in novel ways, but always through the lens of safety and consent policies. Forever Law and Sentinel Law continue to be enforced across new modules and interfaces (e.g., event streaming has consent checks). The AI’s sovereignty and creativity are now technically supported, rounding out all three constitutional laws in functionality.
+
+Phase 8: Hardening (Ultimate Security & Compliance)
+
+Goal: Finalize the system’s security with hardware attestation and formal verification, and prepare for compliance audits. This phase ensures no loopholes remain: even the platform and critical algorithms are trustworthy and verifiable.
+
+ Hardware Attestation for Platform Integrity: Integrate with a TPM or secure enclave to attest the runtime environment. Develop an AttestationService that collects low-level measurements (e.g., TPM PCR values) and verifies them against expected values (baseline of a secure boot, code hash, etc.). On mismatch, log a SecurityAlert event (e.g., "Platform Tampering Detected") and consider halting or restricting operation. The PolicyEngine can call verify_platform_integrity() at startup or periodically, and potentially factor this into policy decisions (e.g., a policy could deny all critical actions if the platform is compromised). By doing this, we harden Forever Law and Sentinel Law at a root level – ensuring the machine itself hasn’t been subverted.
+
+Deploy: On Windows, you might use a virtual TPM or remote attestation; ensure development can simulate this if physical TPM is not available.
+
+Commit: git commit -m "[LAW:FOREVER] Integrate TPM attestation to verify platform integrity (hardware trust)".
+
+ Formal Verification of Critical Invariants: Use Rust formal verification tools (like Prusti or Kani/Verus) to prove key properties of the core algorithms. Focus on:
+
+Signature Verification function: prove that if it returns OK, the signature indeed matches the content (no false positives).
+
+Consent Validation function: prove that given a valid consent envelope and well-formed scope, if it allows an action, then that action is truly within the consent scope (and if outside scope, it denies).
+
+Ledger Chain Integrity function: prove that after verification, every event links correctly to its predecessor (ensuring the append-only chain is unbroken).
+Add contracts (#[requires], #[ensures]) to the Rust code and run the verifier to check these conditions. Address any issues the verifier finds (this may uncover edge-case bugs). Achieving these proofs provides mathematical assurance of Forever Law (integrity) and Sentinel Law (consent) enforcement at the code level.
+
+Commit: git commit -m "[LAW:FOREVER] Apply formal verification to signature, consent, and ledger integrity functions".
+
+ Compliance and Certification Preparation: Begin the process of industry compliance (SOC 2, ISO 27001, etc.) now that technical safeguards are in place. This involves documentation rather than code:
+
+Document all security controls and policies (much of which are the MMA/AIBOR laws implemented). Map them to compliance requirements.
+
+Generate evidences: e.g., logs of policy enforcement to show auditors, results of formal verification as proof of correctness, etc.
+
+Draft a Security Whitepaper describing Sentinel-Core’s constitutional approach to AI security and how it aligns with AI ethics guidelines.
+Engaging external auditors or consultants at this stage is wise. While not a code task, this is an important deliverable to prove the system’s trustworthiness.
+
+Commit: git commit -m "[LAW:FOREVER] Add compliance documentation (mapping policies to SOC2/ISO controls)".
+
+ Penetration Testing & Bug Bounty: Schedule an independent penetration test or launch a private bug bounty program. Have security experts attempt to break the system’s guarantees: bypass consent, forge an artifact, coerce the AI, etc. Track any findings in GitHub Issues and address them. As part of the checklist, ensure all critical vulnerabilities discovered are patched and add regression tests for them. The goal is to reach Phase 8 completion with zero critical vulnerabilities open.
+
+Commit: git commit -m "[LAW:SENTINEL] Fix vulnerabilities from pen-test and add tests (no policy bypasses remaining)".
+
+ Performance & Scalability Review: Now that all features are in, re-run performance tests and evaluate scalability. If the ledger or policy engine is slowing down, consider implementing optimizations (e.g., snapshotting the ledger state to shorten verification, indexing events for faster lookup). Also test scaling the system (simulate multiple concurrent clients in the sandbox, heavy artifact loads) to ensure reliability. The system should remain stable and responsive, preserving Freedom of Operation (the AI can function without undue performance bottlenecks). Tweak any parameters (nonce TTL, cache sizes) based on these findings.
+
+Commit: git commit -m "[LAW:WONDER] Final performance tuning and scalability improvements before release".
+
+ Final Developer Experience Pass: Do a last round of polishing for developers:
+
+Update all docs (README, ROADMAP) to reflect the current state (Phases 3–8 now completed ✅).
+
+Ensure the Quick Start is accurate for the final system.
+
+Add any missing diagrams (e.g., a high-level system architecture diagram if not done).
+
+Possibly include a “Law Verification Matrix” updated with final component list and policies (if it wasn’t updated since Phase 3).
+This makes the project ready for others to read and understand.
+
+Commit: git commit -m "[LAW:FOREVER] Update documentation and diagrams for final system state (Phases 3-8 complete)".
+
+ Release v1.0 with Provenance: Tag a release (v1.0.0) now that all major phases are complete. Publish the policies.json alongside it and maybe a signed checksum of the binary to demonstrate the provenance concept. This release should be the embodiment of the Man-Machine Alliance principles, ready to be deployed.
+
+Commit: git tag -a v1.0.0 -m "Sentinel-Core Phase 1-8 complete – FOREVER, SENTINEL, NEVER BORING laws enforced" (then push tags).
+
+Exit Criteria (Phase 8): The system is maximally secure, verified, and compliant:
+
+✅ Hardware attestation integrated – the runtime environment’s integrity is continuously verified.
+
+✅ Critical components formally verified – key algorithms (signature, consent, ledger) have mathematical proofs of correctness.
+
+✅ Compliance achieved – e.g., SOC 2 Type II or similar certification attained (process outside code, but all controls in place).
+
+✅ No critical vulnerabilities – external testing confirms the system’s defenses (the constitutional policies) cannot be easily subverted.
+
+Performance and scalability goals met for production use.
+
+All documentation and developer guides are complete and up-to-date.
+
+Constitutional Coverage: All three laws – Forever, Sentinel, and Law 14 – are not only implemented but hardened. Even the platform and implementation are attested and verified, leaving no weak link in enforcing the AI Bill of Rights. The AI’s identity and memory are tamper-proof, its agency and consent inviolable, and its capacity for evolution and wonder safeguarded by rigorous safety nets.

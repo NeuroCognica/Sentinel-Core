@@ -1,44 +1,103 @@
 use crate::*;
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::sync::RwLock;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use once_cell::sync::Lazy;
 
-/// Lightweight in-memory nonce registry built by replaying `NonceConsumed` events.
+/// Metadata stored in the registry for a consumed nonce.
 #[derive(Debug, Clone)]
+pub struct NonceMeta {
+    pub envelope_digest: String,
+    pub consumed_at: DateTime<Utc>,
+    /// TTL in seconds for in-memory cache housekeeping only (ledger remains immutable)
+    pub ttl_seconds: i64,
+    /// Optional event offset (useful for debugging / provenance)
+    pub event_offset: Option<usize>,
+}
+
+/// Index-backed NonceRegistry: in-memory, read-optimized cache populated from ledger replay
+/// and updated on each successful `NonceConsumed` append. The ledger is the source-of-truth;
+/// this cache is a read-through optimization only and may be rebuilt from the ledger on startup.
+#[derive(Debug)]
 pub struct NonceRegistry {
-    /// set of (actor_id, nonce)
-    consumed: HashSet<(Uuid, Uuid)>,
-    /// store additional envelope digests if callers need provenance lookups
-    pub envelope_digests: Vec<(Uuid, Uuid, String, DateTime<Utc>)>,
+    map: RwLock<HashMap<(Uuid, Uuid), NonceMeta>>,
 }
 
 impl NonceRegistry {
-    /// Build from an iterator of `IdentityEvent` values (typically obtained by reading the event log)
+    /// Create an empty registry
+    pub fn new_empty() -> Self {
+        NonceRegistry {
+            map: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Build the registry from replayed `IdentityEvent` values (deterministic startup replay).
     pub fn from_events<I: IntoIterator<Item = IdentityEvent>>(events: I) -> Self {
-        let mut consumed = HashSet::new();
-        let mut envelope_digests = Vec::new();
-        for ev in events {
+        let reg = NonceRegistry::new_empty();
+        for (idx, ev) in events.into_iter().enumerate() {
             if let IdentityEvent::NonceConsumed(nc) = ev {
-                consumed.insert((nc.actor_id, nc.nonce));
-                envelope_digests.push((nc.actor_id, nc.nonce, nc.envelope_digest, nc.consumed_at));
+                let meta = NonceMeta {
+                    envelope_digest: nc.envelope_digest.clone(),
+                    consumed_at: nc.consumed_at,
+                    ttl_seconds: NONCE_EXPIRATION_SECS,
+                    event_offset: Some(idx),
+                };
+                reg.insert_cached(nc.actor_id, nc.nonce, meta);
             }
         }
-        NonceRegistry { consumed, envelope_digests }
+        reg
     }
 
-    /// Return true if the given (actor, nonce) was consumed according to the replayed events
+    /// Insert into the in-memory cache. Intended to be called only from startup replay
+    /// or immediately after a successful append observation.
+    pub fn insert_cached(&self, actor_id: Uuid, nonce: Uuid, meta: NonceMeta) {
+        let mut w = self.map.write().expect("nonce registry write lock");
+        w.insert((actor_id, nonce), meta);
+    }
+
+    /// Observe a `NonceConsumed` that was just appended to the ledger and update cache.
+    pub fn observe_consumed(&self, nc: &NonceConsumed, offset: Option<usize>) {
+        let meta = NonceMeta {
+            envelope_digest: nc.envelope_digest.clone(),
+            consumed_at: nc.consumed_at,
+            ttl_seconds: NONCE_EXPIRATION_SECS,
+            event_offset: offset,
+        };
+        self.insert_cached(nc.actor_id, nc.nonce, meta);
+    }
+
+    /// Return true if the given (actor, nonce) was consumed according to the in-memory cache.
+    /// This is a performance shortcut — the canonical truth remains the ledger which can
+    /// be deterministically replayed to rebuild the cache.
     pub fn is_consumed(&self, actor_id: Uuid, nonce: Uuid) -> bool {
-        self.consumed.contains(&(actor_id, nonce))
+        let r = self.map.read().expect("nonce registry read lock");
+        r.contains_key(&(actor_id, nonce))
     }
 
-    /// Merge another registry into this one (useful when streaming additional events)
-    pub fn merge(&mut self, other: &NonceRegistry) {
-        for k in other.consumed.iter() {
-            self.consumed.insert(*k);
+    /// Periodic in-memory pruning of expired cache entries. This does NOT delete ledger events.
+    pub fn prune_expired(&self) {
+        let now = Utc::now();
+        let mut w = self.map.write().expect("nonce registry write lock");
+        w.retain(|_, meta| {
+            let age = now.signed_duration_since(meta.consumed_at).num_seconds();
+            age < meta.ttl_seconds
+        });
+    }
+
+    /// Merge another registry into this one (useful if streaming events incrementally).
+    pub fn merge(&self, other: &NonceRegistry) {
+        let mut w = self.map.write().expect("nonce registry write lock");
+        let r = other.map.read().expect("other registry read lock");
+        for (k, v) in r.iter() {
+            w.insert(*k, v.clone());
         }
-        self.envelope_digests.extend_from_slice(&other.envelope_digests);
     }
 }
+
+/// Global registry instance (lazy-initialized). This is an optional convenience for
+/// callers that want a shared, process-local cache that mirrors ledger-derived authority.
+pub static GLOBAL_NONCE_REGISTRY: Lazy<NonceRegistry> = Lazy::new(|| NonceRegistry::new_empty());
 
 #[cfg(test)]
 mod tests {
