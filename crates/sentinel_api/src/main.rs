@@ -1,3 +1,6 @@
+use ed25519_dalek::Verifier;
+#[cfg(test)]
+mod tests;
 #[post("/whoami")]
 async fn whoami(
     store: web::Data<Mutex<FileEventStore>>,
@@ -9,6 +12,10 @@ async fn whoami(
         Ok(ks) => ks,
         Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
     };
+    let sig = match ed25519_dalek::Signature::from_bytes(&cap.token_signature) {
+        Ok(s) => s,
+        Err(_) => return HttpResponse::Unauthorized().body("invalid capability signature bytes"),
+    };
     let sig_ok = keystore
         .public_key()
         .verify(
@@ -17,7 +24,7 @@ async fn whoami(
                 ..cap.clone()
             })
             .expect("canonical cap serialization"),
-            &ed25519_dalek::Signature::from_bytes(&cap.token_signature).unwrap_or_default(),
+            &sig,
         )
         .is_ok();
     if !sig_ok {
@@ -71,6 +78,10 @@ async fn auth_logout(
         Ok(ks) => ks,
         Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
     };
+    let sig = match ed25519_dalek::Signature::from_bytes(&cap.token_signature) {
+        Ok(s) => s,
+        Err(_) => return HttpResponse::Unauthorized().body("invalid capability signature bytes"),
+    };
     let sig_ok = keystore
         .public_key()
         .verify(
@@ -79,7 +90,7 @@ async fn auth_logout(
                 ..cap.clone()
             })
             .expect("canonical cap serialization"),
-            &ed25519_dalek::Signature::from_bytes(&cap.token_signature).unwrap_or_default(),
+            &sig,
         )
         .is_ok();
     if !sig_ok {
@@ -195,7 +206,7 @@ async fn auth_login(
     };
     let mut found_challenge = None;
     for rec in store_events.iter().rev() {
-        if let Ok(payload) = rec.payload.get("challenge") {
+        if let Some(payload) = rec.payload.get("challenge") {
             if let Some(challenge) = payload.as_str() {
                 // Only consider challenge events for this actor/key
                 if rec.actor == env.actor_id.to_string()
@@ -215,7 +226,7 @@ async fn auth_login(
                             // Check if already used (by searching for a CapabilityIssued event referencing this challenge)
                             let already_used = store_events.iter().any(|evt| {
                                 evt.payload.get("challenge").and_then(|v| v.as_str()) == Some(challenge)
-                                    && evt.kind == EventKind::AuthorizationRequestReceived // Should be CapabilityIssued, but using generic kind for now
+                                // No EventKind comparison (EventKind does not implement PartialEq)
                             });
                             if already_used {
                                 continue; // Used
@@ -331,19 +342,8 @@ async fn auth_login(
     // 8. Deterministic response: return full capability
     HttpResponse::Ok().json(cap)
 }
-use sentinel_capabilities::{Capability, CapabilityEvent, CapabilityIssued, CapabilityState};
-#[post("/auth/login")]
-async fn auth_login(
-    store: web::Data<Mutex<FileEventStore>>,
-    req: web::Json<sentinel_core::CanonicalEnvelopeAuthorizationRequest>,
-) -> impl Responder {
-    // 1. Envelope presence and signature verification (reuse logic from /authz)
-    // 2. Challenge validation (must match unexpired, unused challenge event for actor/key)
-    // 3. Issue session capability (CapabilityIssued event, signed by service key)
-    // 4. Log all events before response, fail loud on any error
-    // 5. Return session capability (full struct, including signature)
-    HttpResponse::NotImplemented().body("/auth/login not yet implemented")
-}
+use sentinel_core::{Capability, CapabilityEvent, CapabilityIssued};
+use sentinel_capabilities::CapabilityState;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use chrono::{Duration};

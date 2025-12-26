@@ -1,6 +1,50 @@
+
 # Sentinel Core
 
-This repository is a governed, append-only, event-sourced framework for secure, auditable, and policy-driven application logic. It uses Rust as the canonical source of truth and Python 3.12 as the UI/orchestration layer.
+This repository implements Sentinel Core: a governed, append-only, event-sourced framework for secure, auditable, and policy-driven application logic. It is built in strict constitutional phases, with all privileged actions cryptographically attributable, all audit events immutable, and all failures visible and queryable. Rust is the canonical source of truth; Python 3.12 is used for UI/orchestration only.
+
+---
+
+## Constitutional Build History (Chronological)
+
+**Phase 1: Immutable Audit Spine**
+- Created append-only, file-backed event log (SHA-256 hash chain, full-chain verification).
+- Enforced loud failure on any tampering (edit, deletion, reorder) or integrity violation.
+- No mutable state as truth; all system state is derived from the event log.
+- No amendments: once committed, the audit spine is sacred.
+
+**Phase 2: Identity & Cryptographic Authority**
+- Introduced canonical envelope for all privileged requests (actor_id, key_id, nonce, timestamp_utc, payload, signature).
+- Implemented Ed25519 signature enforcement and persistent, event-sourced replay protection (nonce registry).
+- All privileged actions require a valid, signed envelope; missing, invalid, replayed, or stale requests are rejected.
+- All requests are logged as AuthorizationRequestReceived events before any decision; failure to log means failure to act.
+- Identity lifecycle (actor registration, key registration/revocation/rotation, nonce consumption) is fully event-sourced.
+
+**Phase 3: Capabilities & Guard Enforcement**
+- Defined canonical Capability model: cryptographically signed, time-bounded, scope-limited, and strictly event-sourced.
+- Implemented CapabilityIssued, CapabilityRevoked, and CapabilityConsumed events; all state is derived from the ledger.
+- Built event-sourced reducer for capabilities (no issuance for unknown actor, no revoking unknown, strict replay, single-use).
+- Implemented /auth/challenge (random, time-bounded, single-use challenge, event-logged before response).
+- Implemented /auth/login (envelope signature verification, challenge validation, session capability issuance, all events logged before response, fail-closed on error).
+- Implemented /auth/logout (session capability revocation, event logged before response, fail-closed on error).
+- Implemented /whoami (capability-guarded endpoint, requires valid session capability, returns actor_id, key_id, and TTL, strict guard enforcement).
+
+**Adversarial and Constitutional Test Coverage**
+- All endpoints are covered by adversarial tests:
+  - Happy path: challenge → login → whoami → logout (all events logged, all guards enforced).
+  - Replay attack: challenge cannot be reused.
+  - Signature tampering: login fails with invalid signature.
+  - Revocation: whoami fails after logout (capability revoked).
+  - Expiry: login fails if challenge is expired.
+- All tests must pass before canonical commit; all failures are visible and attributable.
+
+**Law-Driven Guarantees**
+- FOREVER LAW: All actions of consequence are recorded immutably before completion.
+- SENTINEL LAW: No privileged action may bypass the guard boundary.
+- NEVER BORING LAW: All failures are visible, attributable, and queryable.
+
+---
+
 
 ## Quick Start
 
@@ -31,7 +75,7 @@ python health_check.py
 - crates/sentinel_cli: CLI for admin/dev
 - python_ui: Python 3.12 client and UI harness
 
-## Laws
+## Laws (Summary)
 - Forever Law: All actions are logged before completion
 - Sentinel Law: No bypass of guard boundary
 - Never Boring: All faults are visible and queryable
@@ -63,8 +107,12 @@ python health_check.py
 
 ---
 
+
+---
+
 ## License
 MIT
+
 
 # Sentinel Core: Immutable Ledger & Cryptographic Authority
 

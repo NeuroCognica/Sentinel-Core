@@ -60,6 +60,9 @@ impl IdentityState {
         let mut state = IdentityState::default();
         for event in events {
             match event {
+                                IdentityEvent::GenesisCompleted(_) => {
+                                    // No-op for reducer; genesis is not part of active identity state
+                                }
                 IdentityEvent::ActorRegistered(e) => {
                     if state.actors.contains_key(&e.actor_id) {
                         return Err(format!("Duplicate actor registration: {}", e.actor_id));
