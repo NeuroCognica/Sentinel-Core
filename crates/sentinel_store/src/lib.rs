@@ -71,6 +71,46 @@ impl FileEventStore {
         }
         Ok(store)
     }
+
+    /// Append an event with optional fsync. Returns number of bytes written to the file on success.
+    pub fn append_with_sync(&mut self, mut event: EventRecord, fsync: bool) -> Result<usize, EventStoreError> {
+        // Read last event to get prev_hash
+        let prev_hash = {
+            let file = File::open(&self.path);
+            if let Ok(file) = file {
+                let reader = BufReader::new(file);
+                reader.lines().last().and_then(|line| {
+                    line.ok()
+                        .and_then(|l| serde_json::from_str::<EventRecord>(&l).ok().map(|e| e.hash))
+                })
+            } else {
+                None
+            }
+        };
+        event.prev_hash = prev_hash.clone();
+        event.hash = compute_event_hash(&event);
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|e| {
+                EventStoreError::IoError(format!("Failed to open file for append: {e}"))
+            })?;
+        let json = serde_json::to_string(&event).map_err(|e| {
+            EventStoreError::SerializationError(format!("Failed to serialize event: {e}"))
+        })?;
+        let bytes = json.as_bytes();
+        file.write_all(bytes)
+            .and_then(|_| file.write_all(b"\n"))
+            .and_then(|_| file.flush())
+            .map_err(|e| EventStoreError::IoError(format!("Failed to write/flush event: {e}")))?;
+        if fsync {
+            file.sync_all()
+                .map_err(|e| EventStoreError::IoError(format!("Failed to sync event: {e}")))?;
+        }
+        Ok(bytes.len() + 1) // include newline
+    }
 }
 
 impl EventStore for FileEventStore {

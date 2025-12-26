@@ -26,13 +26,34 @@ fn bench_append(path: &PathBuf, n: usize) -> Result<(), String> {
     }
     let mut store = FileEventStore::open(path).map_err(|e| format!("open: {:?}", e))?;
     let start = Instant::now();
+    // Measure both buffered writes and fsync-per-append
+    // Buffered (existing behavior)
+    let start_buf = Instant::now();
+    let mut total_bytes_buf: usize = 0;
     for i in 0..n {
         let payload = json!({"i": i, "note": "benchmark"});
         let ev = make_event("bench_actor", EventKind::CapabilityIssued, payload);
-        store.append(ev).map_err(|e| format!("append: {:?}", e))?;
+        // use new append_with_sync with fsync=false
+        let bytes = store.append_with_sync(ev, false).map_err(|e| format!("append_buf: {:?}", e))?;
+        total_bytes_buf += bytes;
     }
-    let dur = start.elapsed();
-    println!("append: {} events in {:?} => {:.2} ev/sec", n, dur, (n as f64) / dur.as_secs_f64());
+    let dur_buf = start_buf.elapsed();
+    println!("append (buffered): {} events in {:?} => {:.2} ev/sec; bytes_written={}", n, dur_buf, (n as f64) / dur_buf.as_secs_f64(), total_bytes_buf);
+
+    // fsync-per-append (slower) — write to a separate file for fair comparison
+    let path_sync = path.with_file_name(format!("{}-fsync.log", path.file_name().unwrap().to_string_lossy()));
+    if path_sync.exists() { let _ = remove_file(&path_sync); }
+    let mut store_sync = FileEventStore::open(&path_sync).map_err(|e| format!("open sync: {:?}", e))?;
+    let start_sync = Instant::now();
+    let mut total_bytes_sync: usize = 0;
+    for i in 0..n {
+        let payload = json!({"i": i, "note": "benchmark"});
+        let ev = make_event("bench_actor", EventKind::CapabilityIssued, payload);
+        let bytes = store_sync.append_with_sync(ev, true).map_err(|e| format!("append_sync: {:?}", e))?;
+        total_bytes_sync += bytes;
+    }
+    let dur_sync = start_sync.elapsed();
+    println!("append (fsync-per-append): {} events in {:?} => {:.2} ev/sec; bytes_written={}", n, dur_sync, (n as f64) / dur_sync.as_secs_f64(), total_bytes_sync);
     Ok(())
 }
 
