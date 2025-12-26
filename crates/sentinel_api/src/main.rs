@@ -1,3 +1,51 @@
+use rand::RngCore;
+use rand::rngs::OsRng;
+use chrono::{Duration};
+#[post("/auth/challenge")]
+async fn auth_challenge(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<serde_json::Value>,
+) -> impl Responder {
+    // Accept actor_id, key_id from request
+    let actor_id = req.get("actor_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok());
+    let key_id = req.get("key_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok());
+    if actor_id.is_none() || key_id.is_none() {
+        return HttpResponse::BadRequest().body("missing actor_id or key_id");
+    }
+
+    // Generate random challenge (32 bytes, hex)
+    let mut challenge_bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut challenge_bytes);
+    let challenge = hex::encode(challenge_bytes);
+    let now = Utc::now();
+    let expires_at = now + Duration::seconds(120); // 2 min expiry
+
+    // Log event before response (ChallengeIssued)
+    let event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: now,
+        actor: actor_id.unwrap().to_string(),
+        kind: EventKind::AuthorizationRequestReceived, // Or define new kind for ChallengeIssued
+        payload: json!({
+            "challenge": challenge,
+            "actor_id": actor_id.unwrap().to_string(),
+            "key_id": key_id.unwrap().to_string(),
+            "issued_at_utc": now,
+            "expires_at_utc": expires_at,
+        }),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    let mut store = store.lock().unwrap();
+    if let Err(e) = store.append(event) {
+        return HttpResponse::InternalServerError().body(format!("challenge event append failed: {e:?}"));
+    }
+
+    HttpResponse::Ok().json(json!({
+        "challenge": challenge,
+        "expires_at_utc": expires_at,
+    }))
+}
 #[post("/genesis")]
 async fn genesis(
     store: web::Data<Mutex<FileEventStore>>,
@@ -257,6 +305,7 @@ async fn main() {
             .service(health)
             .service(authz)
             .service(genesis)
+            .service(auth_challenge)
     })
     .bind(("127.0.0.1", 8080));
 
