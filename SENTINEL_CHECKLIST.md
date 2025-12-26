@@ -11,6 +11,8 @@ This checklist is derived from the full improvement suggestions and is designed 
  - [x] Phase 2: runtime boot + `/health` handler implemented and builds — 2025-12-25
  - [x] Commit code for Phase 2/3 handlers and integration tests — 2025-12-25
  - [x] Integration test (genesis → challenge → login) passing locally — 2025-12-25
+ - [x] Phase 3.1: `POST /genesis` implemented — 2025-12-25
+ - [x] Phase 3.2: `POST /auth/challenge` and `POST /auth/login` implemented — 2025-12-25
 
 
 
