@@ -605,6 +605,9 @@ pub async fn auth_login(
         if policy_value.is_none() || input_value.is_none() {
             return HttpResponse::BadRequest().body("missing policy or input");
         }
+
+
+        
         let policy: Policy = match serde_json::from_value(policy_value.unwrap().clone()) {
             Ok(p) => p,
             Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
@@ -710,4 +713,136 @@ pub async fn auth_login(
         }
 
         HttpResponse::Ok().json(json!({ "result": "effect executed" }))
+    }
+
+
+    #[post("/capabilities/issue")]
+    pub async fn capability_issue(
+        store: web::Data<Mutex<FileEventStore>>,
+        req: web::Json<serde_json::Value>,
+    ) -> impl Responder {
+        let body = req.into_inner();
+
+        // Parse required fields
+        let issuer = body.get("issuer").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "sentinel_service".to_string());
+        let subject = body.get("subject").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| issuer.clone());
+        let scope = body.get("scope").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "session".to_string());
+        let actions = body.get("actions").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<String>>()).unwrap_or_else(|| vec!["whoami".to_string()]);
+        let ttl_minutes = body.get("ttl_minutes").and_then(|v| v.as_i64()).unwrap_or(30);
+        let constraints = body.get("constraints").cloned().unwrap_or(json!({}));
+        let simulate_append_failure = body.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        // 1) Build PolicyInput
+        let policy_input = PolicyInput {
+            subject: issuer.clone(),
+            action: "capability_issue".to_string(),
+            resource: scope.clone(),
+            context: json!({ "subject": subject.clone(), "scope": scope.clone(), "actions": actions.clone(), "ttl_minutes": ttl_minutes }),
+        };
+
+        // Use provided policy or default allow for capability issuance
+        let policy = if let Some(pv) = body.get("policy") {
+            match serde_json::from_value::<Policy>(pv.clone()) {
+                Ok(p) => p,
+                Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
+            }
+        } else {
+            Policy {
+                id: "capability_issue_allow".to_string(),
+                version: "v0".to_string(),
+                statements: vec![sentinel_policy::policy::Statement {
+                    when: vec![sentinel_policy::policy::Condition { field: "action".to_string(), op: sentinel_policy::policy::Op::Eq, value: "capability_issue".to_string() }],
+                    effect: sentinel_policy::policy::Effect::Allow,
+                    rationale: "allow capability issuance".to_string(),
+                }],
+            }
+        };
+
+        // 2) Enforce consent (appends PolicyEvaluated and Consent events durably). Fail-closed.
+        let consent = match enforce_consent(&store, &policy, &policy_input).await {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                if e == "policy denied" {
+                    return HttpResponse::Forbidden().body("policy denied");
+                } else {
+                    return HttpResponse::InternalServerError().body(format!("consent enforcement failed: {e}"));
+                }
+            }
+        };
+
+        // 3) Optional test hook: simulate append failure
+        if simulate_append_failure {
+            return HttpResponse::InternalServerError().body("simulated append failure");
+        }
+
+        // 4) Execute issuance: create Capability and sign with service keystore
+        let keystore = match Keystore::load_or_create(std::path::PathBuf::from("./sentinel_service.key")) {
+            Ok(ks) => ks,
+            Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
+        };
+        let capability_id = Uuid::new_v4();
+        let issued_at = Utc::now();
+        let expires_at = issued_at + Duration::minutes(ttl_minutes);
+        let mut cap = Capability {
+            capability_id,
+            actor_id: Uuid::nil(),
+            issued_at_utc: issued_at,
+            expires_at_utc: expires_at,
+            scope: scope.clone(),
+            actions: actions.clone(),
+            constraints: Some(constraints.clone()),
+            issued_by: issuer.clone(),
+            token_signature: vec![],
+        };
+
+        // Sign capability token; use issuer actor if it's a valid UUID else use service actor
+        let issuer_actor = Uuid::parse_str(&issuer).unwrap_or_else(|_| Uuid::nil());
+        let sig = match keystore.sign(&cap, &ActorId(issuer_actor), &capability_id, &issued_at) {
+            Ok(s) => s,
+            Err(e) => return HttpResponse::InternalServerError().body(format!("cap signing failed: {e}")),
+        };
+        cap.token_signature = sig.bytes;
+
+        // 5) Append CapabilityIssued event (fail-closed on append failure)
+        let cap_event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: issued_at,
+            actor: issuer.clone(),
+            kind: EventKind::CapabilityIssued,
+            payload: json!(serde_json::to_value(CapabilityEvent::CapabilityIssued(CapabilityIssued { capability: cap.clone(), issued_at })).unwrap()),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+        let mut store_guard = store.lock().unwrap();
+        if let Err(e) = store_guard.append(cap_event) {
+            return HttpResponse::InternalServerError().body(format!("capability event append failed: {e:?}"));
+        }
+        // release the guard before performing a blocking append to avoid deadlock
+        drop(store_guard);
+
+        // 6) Append EffectExecuted durable with policy/input digests and capability id
+        let effect_event = EventRecord {
+            event_id: Uuid::new_v4(),
+            timestamp_utc: Utc::now(),
+            actor: issuer.clone(),
+            kind: EventKind::EffectExecuted,
+            payload: json!({ "action": "capability_issue", "policy_digest": consent.policy_digest, "input_digest": consent.input_digest, "capability_id": capability_id.to_string() }),
+            prev_hash: None,
+            hash: "UNHASHED".to_string(),
+        };
+        let store_clone = store.clone();
+        let effect = effect_event.clone();
+        let append_res = spawn_blocking(move || {
+            let mut s = store_clone.lock().unwrap();
+            s.append_with_sync(effect, true)
+        })
+        .await;
+        if let Err(_) = append_res {
+            return HttpResponse::InternalServerError().body("effect append task failed");
+        }
+        if let Ok(Err(e)) = append_res {
+            return HttpResponse::InternalServerError().body(format!("effect event append failed: {e:?}"));
+        }
+
+        HttpResponse::Ok().json(cap)
     }
