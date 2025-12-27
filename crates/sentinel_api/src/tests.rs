@@ -100,8 +100,66 @@ async fn test_challenge_replay_fails() {
 
 #[actix_rt::test]
 async fn test_login_with_invalid_signature_fails() {
-    // TODO: Implement signature tampering test: login fails with invalid signature
-    assert!(true, "placeholder");
+    use actix_web::{test, App};
+
+    // Ensure a clean event log
+    let _ = std::fs::remove_file("./sentinel_events.log");
+
+    let store = sentinel_store::FileEventStore::open("./sentinel_events.log").expect("open store");
+    let store_data = actix_web::web::Data::new(std::sync::Mutex::new(store));
+
+    let app = test::init_service(
+        App::new()
+            .app_data(store_data.clone())
+            .service(crate::genesis)
+            .service(crate::auth_challenge)
+            .service(crate::auth_login),
+    )
+    .await;
+
+    // Create actor and key
+    let mut csprng = rand::rngs::OsRng {};
+    let kp = ed25519_dalek::Keypair::generate(&mut csprng);
+    let pub_hex = hex::encode(kp.public.to_bytes());
+    let actor_id = uuid::Uuid::new_v4();
+    let key_id = uuid::Uuid::new_v4();
+
+    // POST /genesis to register actor/key
+    let req = test::TestRequest::post()
+        .uri("/genesis")
+        .set_json(&serde_json::json!({
+            "actor_id": actor_id.to_string(),
+            "key_id": key_id.to_string(),
+            "public_key": pub_hex,
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    // Build a canonical envelope but with an invalid signature (empty)
+    let payload = sentinel_core::AuthorizationRequest {
+        action: "login".to_string(),
+        scope: "session".to_string(),
+        intent: "no-challenge".to_string(),
+    };
+    let nonce = uuid::Uuid::new_v4();
+    let timestamp = chrono::Utc::now();
+
+    let envelope = sentinel_core::CanonicalEnvelopeAuthorizationRequest {
+        actor_id,
+        key_id,
+        nonce,
+        timestamp_utc: timestamp,
+        payload,
+        signature: vec![], // invalid/empty signature should be rejected
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/auth/login")
+        .set_json(&envelope)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().as_u16(), 401);
 }
 
 #[actix_rt::test]

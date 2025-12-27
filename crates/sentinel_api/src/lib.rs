@@ -54,6 +54,47 @@ pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
     }
 }
 
+fn enforce_envelope_signature(envelope: &CanonicalEnvelopeAuthorizationRequest) -> Result<(), HttpResponse> {
+    // Load identity state from event log (fail-closed if cannot load)
+    let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
+        Ok(s) => s,
+        Err(e) => return Err(HttpResponse::InternalServerError().body(format!("identity state load failed: {e}"))),
+    };
+
+    let key_info = identity_state.keys.get(&(envelope.actor_id, envelope.key_id));
+    if key_info.is_none() || key_info.unwrap().status != KeyStatus::Active {
+        return Err(HttpResponse::Unauthorized().body("unknown or revoked key"));
+    }
+
+    let pubkey_bytes = &key_info.unwrap().public_key;
+    let pubkey = match ed25519_dalek::PublicKey::from_bytes(pubkey_bytes) {
+        Ok(pk) => pk,
+        Err(_) => return Err(HttpResponse::Unauthorized().body("invalid public key bytes")),
+    };
+
+    let signed = SignedEnvelope {
+        actor_id: ActorId(envelope.actor_id),
+        key_id: KeyId(envelope.key_id),
+        nonce: envelope.nonce,
+        timestamp_utc: envelope.timestamp_utc,
+        payload: envelope.payload.clone(),
+        signature: SignatureBytes {
+            algorithm: SignatureAlgorithm::Ed25519,
+            bytes: envelope.signature.clone(),
+        },
+    };
+
+    if let Err(_) = verify_signature(&signed, &pubkey) {
+        return Err(HttpResponse::Unauthorized().body("invalid signature"));
+    }
+
+    if !sentinel_identity::verify_freshness(&envelope.timestamp_utc, 300) {
+        return Err(HttpResponse::Unauthorized().body("timestamp outside freshness window"));
+    }
+
+    Ok(())
+}
+
 #[utoipa::path(
     post,
     path = "/artifacts/register",
@@ -198,6 +239,7 @@ pub async fn artifact_use(
         Some(m) => m.clone(),
         None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
     };
+
 
     let capability_id = match body.get("capability_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()) {
         Some(u) => u,
