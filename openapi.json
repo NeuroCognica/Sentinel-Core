@@ -9,7 +9,7 @@
             }
           }
         },
-        "description": "Refusal to Lie — Internal invariant could not be upheld.",
+        "description": "Refusal to Lie â€” Internal invariant could not be upheld.",
         "x-sentinel-name": "Refusal to Lie",
         "x-truth-contract": {
           "codex_seal_created": false,
@@ -38,7 +38,7 @@
             }
           }
         },
-        "description": "Broken Form — The request could not be interpreted as a canonical envelope.",
+        "description": "Broken Form â€” The request could not be interpreted as a canonical envelope.",
         "x-sentinel-name": "Broken Gate",
         "x-truth-contract": {
           "consent_recorded": false,
@@ -54,7 +54,7 @@
             }
           }
         },
-        "description": "Broken Time — Temporal integrity violated.",
+        "description": "Broken Time â€” Temporal integrity violated.",
         "x-sentinel-name": "Broken Time",
         "x-truth-contract": {
           "codex_seal_created": false,
@@ -69,7 +69,7 @@
             }
           }
         },
-        "description": "Unspoken Name — Identity not cryptographically proven.",
+        "description": "Unspoken Name â€” Identity not cryptographically proven.",
         "x-sentinel-name": "Unspoken Name",
         "x-truth-contract": {
           "consent_recorded": false,
@@ -85,7 +85,7 @@
             }
           }
         },
-        "description": "Closed Gate — Authenticated but authority denied.",
+        "description": "Closed Gate â€” Authenticated but authority denied.",
         "x-sentinel-name": "Closed Gate",
         "x-truth-contract": {
           "consent_recorded": true,
@@ -96,6 +96,9 @@
     },
     "schemas": {
       "CanonicalEnvelope": {
+        "$id": "https://example.org/schemas/CanonicalEnvelope.json",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
         "properties": {
           "actor_id": {
             "format": "uuid",
@@ -106,13 +109,21 @@
             "type": "string"
           },
           "nonce": {
+            "format": "uuid",
             "type": "string"
           },
           "payload": {
-            "type": "object"
+            "type": [
+              "object",
+              "string",
+              "array",
+              "number",
+              "boolean",
+              "null"
+            ]
           },
           "signature": {
-            "description": "Base16 or Base64 signature bytes",
+            "description": "Base64 or hex-encoded signature",
             "type": "string"
           },
           "timestamp_utc": {
@@ -128,6 +139,7 @@
           "payload",
           "signature"
         ],
+        "title": "CanonicalEnvelope",
         "type": "object"
       },
       "SentinelError": {

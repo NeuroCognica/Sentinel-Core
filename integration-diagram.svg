@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="700" viewBox="0 0 1400 700">
+  <style>
+    .node { fill:#f4f6fb; stroke:#2b6cb0; stroke-width:2; rx:6; }
+    .label { font: 14px sans-serif; fill:#0b2a4a; }
+    .arrow { stroke:#2b6cb0; stroke-width:2; fill:none; marker-end:url(#arrowhead); }
+    .small { font:12px sans-serif; fill:#17324d; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2b6cb0" />
+    </marker>
+  </defs>
+
+  <!-- Nodes -->
+  <rect x="80" y="80" width="320" height="120" class="node"/>
+  <text x="240" y="110" text-anchor="middle" class="label">sentinel-core</text>
+  <text x="240" y="135" text-anchor="middle" class="small">crates: sentinel_api, sentinel_store,</text>
+  <text x="240" y="152" text-anchor="middle" class="small">sentinel_identity, sentinel_capabilities, sentinel_cli</text>
+
+  <rect x="520" y="40" width="300" height="100" class="node"/>
+  <text x="670" y="70" text-anchor="middle" class="label">sentinel_api (OpenAPI)</text>
+  <text x="670" y="92" text-anchor="middle" class="small">openapi.json (sentinel-core/openapi.json)</text>
+
+  <rect x="520" y="190" width="320" height="100" class="node"/>
+  <text x="680" y="220" text-anchor="middle" class="label">Python UI / Health</text>
+  <text x="680" y="242" text-anchor="middle" class="small">python_ui (Python 3.12) - health_check.py</text>
+
+  <rect x="980" y="40" width="300" height="120" class="node"/>
+  <text x="1130" y="70" text-anchor="middle" class="label">aura</text>
+  <text x="1130" y="92" text-anchor="middle" class="small">schemas: aura/schemas/CanonicalEnvelope.json</text>
+  <text x="1130" y="110" text-anchor="middle" class="small">execution_proof.schema.json; ui/package.json</text>
+
+  <rect x="980" y="220" width="300" height="100" class="node"/>
+  <text x="1130" y="250" text-anchor="middle" class="label">senkern</text>
+  <text x="1130" y="272" text-anchor="middle" class="small">tooling / codex; many build logs</text>
+
+  <rect x="80" y="260" width="320" height="120" class="node"/>
+  <text x="240" y="290" text-anchor="middle" class="label">mecha</text>
+  <text x="240" y="315" text-anchor="middle" class="small">design/docs/launch scripts (IDEAL ASSISTANT)</text>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M400 140 L520 90"/>
+  <text x="470" y="120" class="small">exposes OpenAPI</text>
+
+  <path class="arrow" d="M820 90 L980 100"/>
+  <text x="900" y="80" class="small">OpenAPI -> uses CanonicalEnvelope schema</text>
+
+  <path class="arrow" d="M820 210 L980 240"/>
+  <text x="900" y="200" class="small">API consumed by aura UI / clients</text>
+
+  <path class="arrow" d="M240 200 L640 240"/>
+  <text x="420" y="210" class="small">CLI / admin flows -> sentinel_api</text>
+
+  <path class="arrow" d="M240 320 L640 260"/>
+  <text x="420" y="290" class="small">mecha docs inform expected artifacts</text>
+
+  <path class="arrow" d="M1280 160 L1280 220"/>
+  <text x="1260" y="190" class="small">senkern <-> sentinel-core (tooling / prototypes)</text>
+
+  <!-- Legend -->
+  <rect x="40" y="540" width="1320" height="130" rx="8" fill="#fffbea" stroke="#d69e2e"/>
+  <text x="80" y="570" class="label">Integration legend & key files</text>
+  <text x="80" y="600" class="small">OpenAPI: sentinel-core/openapi.json</text>
+  <text x="80" y="620" class="small">CanonicalEnvelope: aura/schemas/CanonicalEnvelope.json</text>
+  <text x="80" y="640" class="small">Python UI: sentinel-core/python_ui/SETUP_VENV.txt</text>
+</svg>

@@ -55,6 +55,21 @@ pub fn generate_openapi() -> utoipa::openapi::OpenApi {
         }
     }
 
+    // Inject canonical schema from aura if present. This ensures the CanonicalEnvelope
+    // in the generated OpenAPI exactly matches the authoritative file.
+    let canonical_path = "../aura/schemas/CanonicalEnvelope.json";
+    if let Ok(canon_str) = std::fs::read_to_string(canonical_path) {
+        if let Ok(canon_json) = serde_json::from_str::<serde_json::Value>(&canon_str) {
+            if !v.get("components").is_some() || !v["components"].is_object() {
+                v["components"] = serde_json::json!({});
+            }
+            if !v["components"].get("schemas").is_some() || !v["components"]["schemas"].is_object() {
+                v["components"]["schemas"] = serde_json::json!({});
+            }
+            v["components"]["schemas"]["CanonicalEnvelope"] = canon_json;
+        }
+    }
+
     // Deserialize back into OpenApi struct
     // Attempt to deserialize into `utoipa::openapi::OpenApi`.
     // If deserialization fails due to untagged enums (RefOr) or similar
@@ -90,6 +105,20 @@ pub fn generate_openapi_json() -> serde_json::Value {
                 }
             }
         }
+
+            // Also inject canonical schema when generating raw JSON
+            let canonical_path = "../aura/schemas/CanonicalEnvelope.json";
+            if let Ok(canon_str) = std::fs::read_to_string(canonical_path) {
+                if let Ok(canon_json) = serde_json::from_str::<serde_json::Value>(&canon_str) {
+                    if !v.get("components").is_some() || !v["components"].is_object() {
+                        v["components"] = serde_json::json!({});
+                    }
+                    if !v["components"].get("schemas").is_some() || !v["components"]["schemas"].is_object() {
+                        v["components"]["schemas"] = serde_json::json!({});
+                    }
+                    v["components"]["schemas"]["CanonicalEnvelope"] = canon_json;
+                }
+            }
     }
 
     v

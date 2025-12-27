@@ -2,6 +2,22 @@ use serde::{Serialize, Deserialize};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 use time::OffsetDateTime;
+use serde_json::Value;
+
+/// Minimal CanonicalEnvelope type used for OpenAPI component registration
+/// This type mirrors the authoritative shape (fields only); the canonical
+/// JSON Schema is injected into the generated OpenAPI so schema text is
+/// authoritative.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanonicalEnvelope {
+    pub actor_id: String,
+    pub key_id: String,
+    pub nonce: String,
+    pub timestamp_utc: String,
+    pub payload: Value,
+    pub signature: String,
+}
+
 
 /// Stable identifier for an artifact (NOT the content hash)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

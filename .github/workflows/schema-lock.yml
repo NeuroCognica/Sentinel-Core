@@ -1,0 +1,43 @@
+name: Schema Authority Lock
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  constitutional-guard:
+    name: Enforce Schema Authority
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install jsonschema
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Run Schema Lock Protocol
+      run: |
+        # This script performs:
+        # 1. Syntax check of Canonical Schemas
+        # 2. Parity check of OpenAPI generation
+        # 3. Strict Parity check of Rust Struct serialization
+        python sentinel-core/tools/schema_lock.py

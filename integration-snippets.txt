@@ -1,0 +1,13 @@
+Snippet A — CanonicalEnvelope schema (location)
+- Path: aura/schemas/CanonicalEnvelope.json
+- Brief excerpt (fields): actor_id (UUID), key_id (UUID), nonce (UUID), timestamp_utc (RFC3339), payload (object), signature (bytes/base64)
+
+Snippet B — Top OpenAPI paths (summary)
+- Common endpoints: /auth/challenge, /auth/login, /auth/logout, /whoami, /genesis, /health, /policy/evaluate, /capabilities/*, /artifacts/*
+
+Snippet C — `sentinel-core` crate inventory (top-level)
+- sentinel_api, sentinel_store, sentinel_identity, sentinel_capabilities, sentinel_cli, sentinel_policy, sentinel_artifacts, sentinel_bench
+
+Notes:
+- CanonicalEnvelope JSON lives in `aura/schemas` and is referenced by `sentinel-core/openapi.json` (components/schemas).
+- Use these snippets when embedding the diagram or when writing quick integration checks (schema existence, OpenAPI smoke test).
