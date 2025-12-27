@@ -66,6 +66,8 @@ This checklist is derived from the full improvement suggestions and is designed 
 
 ## Short-Term (During Phase 4-5)
 
+- [x] Phase 4 — Deterministic policy evaluation and consent enforcement (SEALED)
+
 - [ ] **Define Policy Schema and Evaluation Engine**
 	- [ ] Specify policy schema format (YAML, Rego, custom DSL)
 	- [ ] Add versioning and digest calculation for policies

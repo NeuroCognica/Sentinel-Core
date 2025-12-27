@@ -180,6 +180,24 @@ cargo bench --bench ledger_performance
 
 ### Phase 4: Policy Engine (Short-Term Priority)
 
+## Phase 4 — Policy & Consent Enforcement
+**Status:** ✅ COMPLETE  
+**Authority:** Deterministic policy + immutable consent
+
+### Guarantees Achieved
+- All privileged effects require prior PolicyEvaluated and ConsentGranted events.
+- Authorization is deterministic and replayable from the ledger alone.
+- Fail-closed semantics on append failure prevent partial effects.
+- No legacy or inline authorization paths remain.
+
+### Proof Artifacts
+- Events: PolicyEvaluated, ConsentGranted/Denied, EffectExecuted
+- Helper: enforce_consent()
+- Tests:
+    - genesis_consent.rs
+    - capability_consent.rs
+    - phase4_seal.rs
+
 **Timeline**: 4-6 weeks
 
 **Objective**: Deploy all nine policies with full provenance tracking.

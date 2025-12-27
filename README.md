@@ -8,6 +8,8 @@ This repository implements Sentinel Core: a governed, append-only, event-sourced
 
 Phase 3 (Nonce & Replay Protection) is complete and constitutionally enforced.
 
+Phase 4 (Policy & Consent Enforcement) is complete and constitutionally enforced.
+
 ---
 
 ## Quick Start
