@@ -20,6 +20,8 @@ use sentinel_policy::event::Decision as PolicyDecision;
 pub mod middleware;
 mod consent;
 use consent::{enforce_consent, ConsentContext};
+use sentinel_artifacts::{ArtifactEvent, ArtifactId, ArtifactType as SAType, CodexSeal};
+use time::OffsetDateTime;
 
 #[get("/health")]
 pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
@@ -39,6 +41,102 @@ pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
         Ok(_) => HttpResponse::Ok().body("ok"),
         Err(e) => HttpResponse::InternalServerError().body(format!("event append failed: {e:?}")),
     }
+}
+
+#[post("/artifacts/register")]
+pub async fn artifact_register(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<serde_json::Value>,
+) -> impl Responder {
+    let body = req.into_inner();
+
+    let artifact_digest = match body.get("artifact_digest").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return HttpResponse::BadRequest().body("artifact_digest is required"),
+    };
+    let artifact_type = match body.get("artifact_type").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return HttpResponse::BadRequest().body("artifact_type is required"),
+    };
+    let dependencies = body.get("dependencies").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<String>>()).unwrap_or_else(|| vec![]);
+    let metadata = body.get("metadata").and_then(|v| v.as_object()).map(|m| m.iter().map(|(k,v)| (k.clone(), v.as_str().unwrap_or_default().to_string())).collect::<std::collections::BTreeMap<String,String>>()).unwrap_or_default();
+    let simulate_append_failure = body.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 1) Build PolicyInput
+    let policy_input = PolicyInput {
+        subject: body.get("subject").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "artifact_service".to_string()),
+        action: "artifact_register".to_string(),
+        resource: "artifact".to_string(),
+        context: json!({ "artifact_digest": artifact_digest.clone(), "artifact_type": artifact_type.clone() }),
+    };
+
+    // default policy: allow
+    let policy = if let Some(pv) = body.get("policy") {
+        match serde_json::from_value::<Policy>(pv.clone()) {
+            Ok(p) => p,
+            Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
+        }
+    } else {
+        Policy { id: "artifact_register_allow".to_string(), version: "v0".to_string(), statements: vec![sentinel_policy::policy::Statement { when: vec![sentinel_policy::policy::Condition { field: "action".to_string(), op: sentinel_policy::policy::Op::Eq, value: "artifact_register".to_string() }], effect: sentinel_policy::policy::Effect::Allow, rationale: "allow artifact register".to_string() }] }
+    };
+
+    // 2) Enforce consent
+    let consent = match enforce_consent(&store, &policy, &policy_input).await {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            if e == "policy denied" {
+                return HttpResponse::Forbidden().body("policy denied");
+            } else {
+                return HttpResponse::InternalServerError().body(format!("consent enforcement failed: {e}"));
+            }
+        }
+    };
+
+    if simulate_append_failure {
+        return HttpResponse::InternalServerError().body("simulated append failure");
+    }
+
+    // Deterministic artifact_id based on artifact_type + digest
+    let name = format!("{}:{}", artifact_type, artifact_digest);
+    let artifact_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, name.as_bytes());
+    let artifact_id = ArtifactId(artifact_uuid);
+
+    // Map artifact_type string to enum (basic mapping)
+    let atype = match artifact_type.to_lowercase().as_str() {
+        "executable" => SAType::Executable,
+        "model" | "modelweights" | "model_weights" => SAType::ModelWeights,
+        "prompt" | "prompttemplate" | "prompt_template" => SAType::PromptTemplate,
+        "tool" | "tooldefinition" | "tool_definition" => SAType::ToolDefinition,
+        "config" => SAType::Config,
+        _ => return HttpResponse::BadRequest().body("unknown artifact_type"),
+    };
+
+    // 3) Append ArtifactRegistered event
+    let created_at = OffsetDateTime::now_utc();
+    let art_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: policy_input.subject.clone(),
+        kind: sentinel_store::EventKind::ArtifactRegistered,
+        payload: serde_json::to_value(&ArtifactEvent::ArtifactRegistered {
+            artifact_id: artifact_id.clone(),
+            artifact_digest: artifact_digest.clone(),
+            artifact_type: atype,
+            dependencies: dependencies.clone(),
+            metadata: metadata.clone(),
+            created_by: policy_input.subject.clone(),
+            created_at,
+        }).unwrap(),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+
+    let mut store_guard = store.lock().unwrap();
+    if let Err(e) = store_guard.append(art_event) {
+        return HttpResponse::InternalServerError().body(format!("artifact event append failed: {e:?}"));
+    }
+
+    HttpResponse::Ok().json(json!({ "artifact_id": artifact_id.0.to_string(), "artifact_digest": artifact_digest }))
 }
 
 #[post("/genesis")]
