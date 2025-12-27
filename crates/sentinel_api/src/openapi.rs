@@ -9,16 +9,15 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         // Consent-gated and core handlers (listed so generator includes them)
-        sentinel_api::artifact_register,
-        sentinel_api::artifact_use,
-        sentinel_api::capability_issue,
-        sentinel_api::privileged_action,
-        sentinel_api::policy_evaluate,
-        sentinel_api::auth_login,
-        sentinel_api::auth_challenge,
-        sentinel_api::genesis,
-        sentinel_api::health,
-        sentinel_api::auth_logout
+        crate::artifact_register,
+        crate::artifact_use,
+        crate::capability_issue,
+        crate::privileged_action,
+        crate::policy_evaluate,
+        crate::auth_login,
+        crate::auth_challenge,
+        crate::genesis,
+        crate::health
     ),
     components(
         // List all request/response types here
@@ -36,27 +35,62 @@ pub fn generate_openapi() -> utoipa::openapi::OpenApi {
     // Serialize to JSON value so we can inject external component $ref links
     let mut v: JsonValue = serde_json::to_value(&api).expect("serialize openapi to json");
 
-    // Inject components that reference the external boundary semantics YAML
-    // Use relative path to docs file so the bundler can resolve or the publisher can merge later
-    let external_components = serde_json::json!({
-        "schemas": {
-            "CanonicalEnvelope": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/schemas/CanonicalEnvelope" }
-        },
-        "responses": {
-            "MALFORMED_ENVELOPE_400": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/responses/MALFORMED_ENVELOPE_400" },
-            "UNPROVEN_IDENTITY_401": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/responses/UNPROVEN_IDENTITY_401" },
-            "WITHHELD_AUTHORITY_403": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/responses/WITHHELD_AUTHORITY_403" },
-            "TEMPORAL_VIOLATION_409": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/responses/TEMPORAL_VIOLATION_409" },
-            "INVARIANT_BREACH_500": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/responses/INVARIANT_BREACH_500" }
-        },
-        "securitySchemes": {
-            "EnvelopeAuth": { "$ref": "./docs/api/boundary_semantics_openapi.yaml#/components/securitySchemes/EnvelopeAuth" }
+    // Merge components from the external boundary semantics YAML into generated OpenAPI.
+    // If the YAML file is not present or fails to parse, fall back to leaving generated components intact.
+    let yaml_path = "docs/api/boundary_semantics_openapi.yaml";
+    if let Ok(yaml_str) = std::fs::read_to_string(yaml_path) {
+        if let Ok(ext_val) = serde_yaml::from_str::<serde_json::Value>(&yaml_str) {
+            if let Some(ext_components) = ext_val.get("components") {
+                // Ensure v["components"] is an object
+                if !v.get("components").is_some() || !v["components"].is_object() {
+                    v["components"] = serde_json::json!({});
+                }
+                // Merge each key from ext_components into v["components"] (shallow merge)
+                if let (Some(components_map), Some(ext_map)) = (v.get_mut("components"), ext_components.as_object()) {
+                    for (k, vext) in ext_map.iter() {
+                        components_map.as_object_mut().unwrap().insert(k.clone(), vext.clone());
+                    }
+                }
+            }
         }
-    });
-
-    v["components"] = external_components;
+    }
 
     // Deserialize back into OpenApi struct
-    let merged: utoipa::openapi::OpenApi = serde_json::from_value(v).expect("deserialize modified openapi");
-    merged
+    // Attempt to deserialize into `utoipa::openapi::OpenApi`.
+    // If deserialization fails due to untagged enums (RefOr) or similar
+    // incompatibilities introduced by merging external YAML, the caller
+    // may prefer the raw merged JSON. We keep this function for
+    // compatibility but panic with a helpful error when deserialization
+    // fails so callers can opt to use `generate_openapi_json` instead.
+    match serde_json::from_value(v.clone()) {
+        Ok(merged) => merged,
+        Err(e) => panic!("deserialize modified openapi: {e}"),
+    }
+}
+
+/// Generate merged OpenAPI as a raw JSON `Value` by combining
+/// code-first output with external YAML components. This avoids
+/// deserialization back into `utoipa` types and is suitable for
+/// emitting `openapi.json` directly.
+pub fn generate_openapi_json() -> serde_json::Value {
+    let api = SentinelApiDoc::openapi();
+    let mut v: JsonValue = serde_json::to_value(&api).expect("serialize openapi to json");
+
+    let yaml_path = "docs/api/boundary_semantics_openapi.yaml";
+    if let Ok(yaml_str) = std::fs::read_to_string(yaml_path) {
+        if let Ok(ext_val) = serde_yaml::from_str::<serde_json::Value>(&yaml_str) {
+            if let Some(ext_components) = ext_val.get("components") {
+                if !v.get("components").is_some() || !v["components"].is_object() {
+                    v["components"] = serde_json::json!({});
+                }
+                if let (Some(components_map), Some(ext_map)) = (v.get_mut("components"), ext_components.as_object()) {
+                    for (k, vext) in ext_map.iter() {
+                        components_map.as_object_mut().unwrap().insert(k.clone(), vext.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    v
 }

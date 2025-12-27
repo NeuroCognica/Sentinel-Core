@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "proof_id": "7f6c6a8c-7f7a-4f89-9a3b-9b2e8d8b8a01",
+  "envelope_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "executor": {
+    "executor_id": "mechanician-main",
+    "executor_type": "mechanician"
+  },
+  "started_at_utc": "2025-01-01T00:00:00Z",
+  "completed_at_utc": "2025-01-01T00:00:01Z",
+  "artifacts": [
+    {
+      "artifact_type": "output",
+      "artifact_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "role": "output"
+    },
+    {
+      "artifact_type": "log",
+      "artifact_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "role": "derived"
+    }
+  ],
+  "outcome": {
+    "status": "success"
+  }
+}

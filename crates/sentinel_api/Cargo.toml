@@ -28,6 +28,7 @@ sentinel_identity = { path = "../sentinel_identity" }
 sentinel_policy = { path = "../sentinel_policy" }
 sentinel_artifacts = { path = "../sentinel_artifacts" }
 time = { version = "0.3", features = ["macros","serde"] }
+serde_yaml = "0.9"
 
 
 [features]

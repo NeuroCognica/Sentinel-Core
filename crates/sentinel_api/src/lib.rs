@@ -25,8 +25,17 @@ use consent::{enforce_consent, ConsentContext};
 use sentinel_artifacts::{ArtifactEvent, ArtifactId, ArtifactType as SAType, CodexSeal};
 use time::OffsetDateTime;
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "ok"),
+        (status = 500, description = "Invariant breach")
+    )
+)]
 #[get("/health")]
 pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
+    // existing implementation retained (duplicate signature removed by moving attribute)
     let mut store = store.lock().unwrap();
 
     let event = EventRecord {
@@ -51,13 +60,13 @@ pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
     security(("EnvelopeAuth" = [])),
     responses(
         (status = 200, description = "Artifact registered; id returned"),
-        (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-        (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-        (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-        (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-        (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        (status = 400, description = "Malformed envelope"),
+        (status = 401, description = "Unproven identity"),
+        (status = 403, description = "Withheld authority"),
+        (status = 409, description = "Temporal violation"),
+        (status = 500, description = "Invariant breach")
     ),
-    summary = "Register an artifact under consent and policy control"
+        
 )]
 #[post("/artifacts/register")]
 pub async fn artifact_register(
@@ -169,13 +178,13 @@ pub async fn artifact_register(
     security(("EnvelopeAuth" = [])),
     responses(
         (status = 200, description = "Artifact access granted"),
-        (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-        (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-        (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-        (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-        (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        (status = 400, description = "Malformed envelope"),
+        (status = 401, description = "Unproven identity"),
+        (status = 403, description = "Withheld authority"),
+        (status = 409, description = "Temporal violation"),
+        (status = 500, description = "Invariant breach")
     ),
-    summary = "Consume a capability to use an artifact"
+    
 )]
 #[post("/artifacts/use")]
 pub async fn artifact_use(
@@ -318,13 +327,13 @@ pub async fn artifact_use(
     security(("EnvelopeAuth" = [])),
     responses(
         (status = 200, description = "Genesis completed"),
-        (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-        (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-        (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-        (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-        (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        (status = 400, description = "Malformed envelope"),
+        (status = 401, description = "Unproven identity"),
+        (status = 403, description = "Withheld authority"),
+        (status = 409, description = "Temporal violation"),
+        (status = 500, description = "Invariant breach")
     ),
-    summary = "One-time genesis bootstrap (sealed, idempotent)"
+    
 )]
 #[post("/genesis")]
 pub async fn genesis(
@@ -509,17 +518,29 @@ pub async fn genesis(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/challenge",
+    responses(
+        (status = 200, description = "Challenge issued"),
+        (status = 400, description = "missing actor_id or key_id"),
+        (status = 401, description = "unknown or revoked key"),
+        (status = 500, description = "identity state load or append failure")
+    ),
+)]
 #[post("/auth/challenge")]
 pub async fn auth_challenge(
     store: web::Data<Mutex<FileEventStore>>,
     req: web::Json<serde_json::Value>,
 ) -> impl Responder {
-    // Parse actor_id and key_id
-    let actor_id = req
+    // existing implementation preserved
+    let body = req.into_inner();
+
+    let actor_id = body
         .get("actor_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
-    let key_id = req
+    let key_id = body
         .get("key_id")
         .and_then(|v| v.as_str())
         .and_then(|s| Uuid::parse_str(s).ok());
@@ -528,7 +549,6 @@ pub async fn auth_challenge(
         return HttpResponse::BadRequest().body("missing actor_id or key_id");
     }
 
-    // Verify actor/key exist and key is active
     let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
         Ok(state) => state,
         Err(e) => return HttpResponse::InternalServerError().body(format!("identity state load failed: {e}")),
@@ -541,7 +561,6 @@ pub async fn auth_challenge(
         return HttpResponse::Unauthorized().body("unknown or revoked key");
     }
 
-    // Generate 32-byte challenge via SHA-256(Uuid + now + Uuid)
     let now = Utc::now();
     let mut hasher = Sha256::new();
     hasher.update(Uuid::new_v4().as_bytes());
@@ -551,7 +570,6 @@ pub async fn auth_challenge(
     let challenge = hex::encode(digest);
     let expires_at = now + Duration::seconds(120);
 
-    // Log typed AuthChallengeIssued event before responding
     let mut store_guard = store.lock().unwrap();
     let typed = AuthChallengeIssued {
         challenge: challenge.clone(),
@@ -583,13 +601,13 @@ pub async fn auth_challenge(
         security(("EnvelopeAuth" = [])),
         responses(
             (status = 200, description = "Authenticate and issue capability"),
-            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+            (status = 400, description = "Malformed envelope"),
+            (status = 401, description = "Unproven identity"),
+            (status = 403, description = "Withheld authority"),
+            (status = 409, description = "Temporal violation"),
+            (status = 500, description = "Invariant breach")
         ),
-        summary = "Authenticate actor via canonical envelope and issue session capability"
+        
     )]
     #[post("/auth/login")]
 pub async fn auth_login(
@@ -792,6 +810,14 @@ pub async fn auth_login(
     HttpResponse::Ok().json(cap)
 }
 
+#[cfg(feature = "openapi")]
+pub mod openapi;
+
+
+    // `openapi` module declared at the end of this file to ensure all
+    // handler functions annotated with `#[utoipa::path]` are defined
+    // before the OpenApi derive is expanded.
+
 
     #[utoipa::path(
         post,
@@ -799,13 +825,13 @@ pub async fn auth_login(
         security(("EnvelopeAuth" = [])),
         responses(
             (status = 200, description = "Policy evaluation result"),
-            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+            (status = 400, description = "Malformed envelope"),
+            (status = 401, description = "Unproven identity"),
+            (status = 403, description = "Withheld authority"),
+            (status = 409, description = "Temporal violation"),
+            (status = 500, description = "Invariant breach")
         ),
-        summary = "Evaluate policy without executing effects"
+        
     )]
     #[post("/policy/evaluate")]
     pub async fn policy_evaluate(
@@ -933,13 +959,13 @@ pub async fn auth_login(
         security(("EnvelopeAuth" = [])),
         responses(
             (status = 200, description = "Effect executed"),
-            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+            (status = 400, description = "Malformed envelope"),
+            (status = 401, description = "Unproven identity"),
+            (status = 403, description = "Withheld authority"),
+            (status = 409, description = "Temporal violation"),
+            (status = 500, description = "Invariant breach")
         ),
-        summary = "Execute a privileged action with provenance sealing"
+        
     )]
     #[post("/privileged/action")]
     pub async fn privileged_action(
@@ -1077,13 +1103,13 @@ pub async fn auth_login(
         security(("EnvelopeAuth" = [])),
         responses(
             (status = 200, description = "Capability issued"),
-            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
-            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
-            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
-            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
-            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+            (status = 400, description = "Malformed envelope"),
+            (status = 401, description = "Unproven identity"),
+            (status = 403, description = "Withheld authority"),
+            (status = 409, description = "Temporal violation"),
+            (status = 500, description = "Invariant breach")
         ),
-        summary = "Issue a capability subject to policy and consent"
+        
     )]
     #[post("/capabilities/issue")]
     pub async fn capability_issue(
