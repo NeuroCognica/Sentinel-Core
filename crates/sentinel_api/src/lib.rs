@@ -45,6 +45,20 @@ pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/artifacts/register",
+    security(("EnvelopeAuth" = [])),
+    responses(
+        (status = 200, description = "Artifact registered; id returned"),
+        (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+        (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+        (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+        (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+        (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+    ),
+    summary = "Register an artifact under consent and policy control"
+)]
 #[post("/artifacts/register")]
 pub async fn artifact_register(
     store: web::Data<Mutex<FileEventStore>>,
@@ -149,6 +163,20 @@ pub async fn artifact_register(
 }
 
 
+#[utoipa::path(
+    post,
+    path = "/artifacts/use",
+    security(("EnvelopeAuth" = [])),
+    responses(
+        (status = 200, description = "Artifact access granted"),
+        (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+        (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+        (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+        (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+        (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+    ),
+    summary = "Consume a capability to use an artifact"
+)]
 #[post("/artifacts/use")]
 pub async fn artifact_use(
     store: web::Data<Mutex<FileEventStore>>,
@@ -284,6 +312,20 @@ pub async fn artifact_use(
     HttpResponse::Ok().json(json!({ "result": "capability consumed", "capability_id": capability_id.to_string(), "policy_digest": consent.policy_digest, "input_digest": consent.input_digest }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/genesis",
+    security(("EnvelopeAuth" = [])),
+    responses(
+        (status = 200, description = "Genesis completed"),
+        (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+        (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+        (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+        (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+        (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+    ),
+    summary = "One-time genesis bootstrap (sealed, idempotent)"
+)]
 #[post("/genesis")]
 pub async fn genesis(
     store: web::Data<Mutex<FileEventStore>>,
@@ -535,7 +577,21 @@ pub async fn auth_challenge(
     HttpResponse::Ok().json(json!({ "challenge": challenge, "expires_at_utc": expires_at }))
 }
 
-#[post("/auth/login")]
+    #[utoipa::path(
+        post,
+        path = "/auth/login",
+        security(("EnvelopeAuth" = [])),
+        responses(
+            (status = 200, description = "Authenticate and issue capability"),
+            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        ),
+        summary = "Authenticate actor via canonical envelope and issue session capability"
+    )]
+    #[post("/auth/login")]
 pub async fn auth_login(
     store: web::Data<Mutex<FileEventStore>>,
     req_http: HttpRequest,
@@ -737,6 +793,20 @@ pub async fn auth_login(
 }
 
 
+    #[utoipa::path(
+        post,
+        path = "/policy/evaluate",
+        security(("EnvelopeAuth" = [])),
+        responses(
+            (status = 200, description = "Policy evaluation result"),
+            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        ),
+        summary = "Evaluate policy without executing effects"
+    )]
     #[post("/policy/evaluate")]
     pub async fn policy_evaluate(
         store: web::Data<Mutex<FileEventStore>>,
@@ -857,6 +927,20 @@ pub async fn auth_login(
         }))
     }
 
+    #[utoipa::path(
+        post,
+        path = "/privileged/action",
+        security(("EnvelopeAuth" = [])),
+        responses(
+            (status = 200, description = "Effect executed"),
+            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        ),
+        summary = "Execute a privileged action with provenance sealing"
+    )]
     #[post("/privileged/action")]
     pub async fn privileged_action(
         store: web::Data<Mutex<FileEventStore>>,
@@ -987,6 +1071,20 @@ pub async fn auth_login(
     }
 
 
+    #[utoipa::path(
+        post,
+        path = "/capabilities/issue",
+        security(("EnvelopeAuth" = [])),
+        responses(
+            (status = 200, description = "Capability issued"),
+            (status = 400, ref = "#/components/responses/MALFORMED_ENVELOPE_400"),
+            (status = 401, ref = "#/components/responses/UNPROVEN_IDENTITY_401"),
+            (status = 403, ref = "#/components/responses/WITHHELD_AUTHORITY_403"),
+            (status = 409, ref = "#/components/responses/TEMPORAL_VIOLATION_409"),
+            (status = 500, ref = "#/components/responses/INVARIANT_BREACH_500")
+        ),
+        summary = "Issue a capability subject to policy and consent"
+    )]
     #[post("/capabilities/issue")]
     pub async fn capability_issue(
         store: web::Data<Mutex<FileEventStore>>,
