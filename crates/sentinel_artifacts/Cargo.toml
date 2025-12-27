@@ -9,7 +9,7 @@ uuid = { version = "1.4", features = ["v4","serde"] }
 time = { version = "0.3", features = ["macros","serde"] }
 
 [dev-dependencies]
-# keep tests simple
+serde_json = "1.0"
 
 [lib]
 name = "sentinel_artifacts"

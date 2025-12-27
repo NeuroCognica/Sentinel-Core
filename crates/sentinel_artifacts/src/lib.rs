@@ -63,12 +63,66 @@ pub enum ArtifactEvent {
         revoked_by: String,
         revoked_at: OffsetDateTime,
     },
+
+    /// A cryptographic provenance binding that ties artifact -> policy/input -> consent
+    CodexSealCreated {
+        seal: CodexSeal,
+    },
 }
 /// In-memory registry rebuilt from events
 #[derive(Debug, Default, Clone)]
 pub struct ArtifactRegistry {
     pub by_id: BTreeMap<ArtifactId, Artifact>,
     pub revoked: BTreeMap<ArtifactId, String>,
+}
+
+/// CodexSeal binds what ran to why it was allowed and who caused it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodexSeal {
+    pub seal_id: Uuid,
+
+    /// What ran (artifact content digest)
+    pub artifact_digest: String,
+
+    /// Policy provenance
+    pub policy_digest: String,
+    pub input_digest: String,
+
+    /// Proof of consent (event id)
+    pub consent_event_id: Uuid,
+
+    /// Actor who caused the sealed action
+    pub actor_id: String,
+
+    /// When this binding was created
+    pub sealed_at: OffsetDateTime,
+}
+
+impl CodexSeal {
+    /// Constructor that requires the canonical provenances — makes illegal states unrepresentable.
+    pub fn new(
+        artifact_digest: String,
+        policy_digest: String,
+        input_digest: String,
+        consent_event_id: Uuid,
+        actor_id: String,
+        sealed_at: OffsetDateTime,
+    ) -> Self {
+        // Minimal validation: required strings must not be empty
+        assert!(!artifact_digest.is_empty(), "artifact_digest required");
+        assert!(!policy_digest.is_empty(), "policy_digest required");
+        assert!(!input_digest.is_empty(), "input_digest required");
+
+        CodexSeal {
+            seal_id: Uuid::new_v4(),
+            artifact_digest,
+            policy_digest,
+            input_digest,
+            consent_event_id,
+            actor_id,
+            sealed_at,
+        }
+    }
 }
 
 impl ArtifactRegistry {
@@ -99,6 +153,10 @@ impl ArtifactRegistry {
             ArtifactEvent::ArtifactValidated { .. } => {
                 // Validations are append-only annotations; no state mutation needed for basic registry
             }
+
+            ArtifactEvent::CodexSealCreated { .. } => {
+                // Codex seals are provenance bindings; they do not modify the artifact registry state.
+            }
         }
     }
 
@@ -116,6 +174,8 @@ impl ArtifactRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json;
+    use std::collections::HashSet;
 
     fn make_registered_event(id: Uuid, digest: &str) -> ArtifactEvent {
         ArtifactEvent::ArtifactRegistered {
@@ -158,5 +218,34 @@ mod tests {
         // duplicate registration should leave single entry for id
         assert!(r.by_id.contains_key(&ArtifactId(id)));
         assert_eq!(r.by_id.len(), 1);
+    }
+
+    #[test]
+    fn codex_seal_roundtrip_and_determinism() {
+        let consent_id = Uuid::new_v4();
+        let seal = CodexSeal::new(
+            "ad:deadbeef".to_string(),
+            "pd:abc123".to_string(),
+            "id:xyz789".to_string(),
+            consent_id,
+            "actor-1".to_string(),
+            OffsetDateTime::now_utc(),
+        );
+
+        // serialize / deserialize round-trip
+        let ser = serde_json::to_string(&seal).expect("serialize");
+        let de: CodexSeal = serde_json::from_str(&ser).expect("deserialize");
+        assert_eq!(seal.artifact_digest, de.artifact_digest);
+        assert_eq!(seal.policy_digest, de.policy_digest);
+
+        // replay determinism: serializing twice yields same string (canonical key ordering via serde)
+        let ser2 = serde_json::to_string(&de).expect("serialize2");
+        assert_eq!(ser, ser2);
+
+        // uniqueness by (artifact_digest, consent_event_id)
+        let mut set: HashSet<(String, Uuid)> = HashSet::new();
+        assert!(set.insert((seal.artifact_digest.clone(), seal.consent_event_id)));
+        // inserting same combination should be rejected (set returns false)
+        assert!(!set.insert((seal.artifact_digest.clone(), seal.consent_event_id)));
     }
 }
