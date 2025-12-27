@@ -7,9 +7,14 @@ pub struct Capability {
     pub expires_at_utc: DateTime<Utc>,
     pub scope: String,
     pub actions: Vec<String>,
-    pub constraints: Option<serde_json::Value>, // Flexible, e.g. artifact digests, rate limits
+    pub constraints: Option<CapabilityConstraints>,
     pub issued_by: String,                      // Sentinel service identity
     pub token_signature: Vec<u8>,               // Ed25519 signature over canonical fields
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityConstraints {
+    pub allowed_artifact_digests: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,6 +42,7 @@ pub struct CapabilityConsumed {
     pub capability_id: Uuid,
     pub consumed_at: DateTime<Utc>,
     pub envelope_digest: String, // SHA-256 of the envelope that used it
+    pub artifact_digest: Option<String>,
 }
 /// Identity lifecycle events for append-only ledger
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

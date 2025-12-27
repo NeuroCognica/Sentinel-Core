@@ -13,7 +13,7 @@ use chrono::Duration;
 use sha2::Sha256;
 use sha2::Digest;
 use ed25519_dalek::PublicKey;
-use sentinel_core::{CanonicalEnvelopeAuthorizationRequest, Capability, CapabilityEvent, CapabilityIssued};
+use sentinel_core::{CanonicalEnvelopeAuthorizationRequest, Capability, CapabilityEvent, CapabilityIssued, CapabilityConstraints, CapabilityConsumed};
 use sentinel_identity::{ActorId, KeyId, SignedEnvelope, SignatureBytes, SignatureAlgorithm, Keystore, verify_signature};
 use sentinel_policy::{Policy, PolicyInput, make_policy_evaluated};
 use sentinel_policy::event::Decision as PolicyDecision;
@@ -137,6 +137,71 @@ pub async fn artifact_register(
     }
 
     HttpResponse::Ok().json(json!({ "artifact_id": artifact_id.0.to_string(), "artifact_digest": artifact_digest }))
+}
+
+
+#[post("/artifacts/use")]
+pub async fn artifact_use(
+    store: web::Data<Mutex<FileEventStore>>,
+    req: web::Json<serde_json::Value>,
+) -> impl Responder {
+    let body = req.into_inner();
+
+    let capability_id = match body.get("capability_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()) {
+        Some(u) => u,
+        None => return HttpResponse::BadRequest().body("capability_id is required and must be a UUID"),
+    };
+    let artifact_digest = match body.get("artifact_digest").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return HttpResponse::BadRequest().body("artifact_digest is required"),
+    };
+
+    // Build policy input for consuming a capability to use an artifact
+    let policy_input = PolicyInput {
+        subject: body.get("subject").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "artifact_service".to_string()),
+        action: "capability_consume".to_string(),
+        resource: "artifact_use".to_string(),
+        context: json!({ "capability_id": capability_id.to_string(), "artifact_digest": artifact_digest.clone() }),
+    };
+
+    // Default allow policy for now
+    let policy = Policy { id: "capability_consume_allow".to_string(), version: "v0".to_string(), statements: vec![sentinel_policy::policy::Statement { when: vec![sentinel_policy::policy::Condition { field: "action".to_string(), op: sentinel_policy::policy::Op::Eq, value: "capability_consume".to_string() }], effect: sentinel_policy::policy::Effect::Allow, rationale: "allow capability consumption".to_string() }] };
+
+    // Enforce consent (appends PolicyEvaluated and Consent events durably). Fail-closed.
+    let consent = match enforce_consent(&store, &policy, &policy_input).await {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            if e == "policy denied" {
+                return HttpResponse::Forbidden().body("policy denied");
+            } else {
+                return HttpResponse::InternalServerError().body(format!("consent enforcement failed: {e}"));
+            }
+        }
+    };
+
+    // Append CapabilityConsumed event (must include artifact_digest)
+    let consumed_typed = CapabilityConsumed {
+        capability_id,
+        consumed_at: Utc::now(),
+        envelope_digest: "N/A".to_string(),
+        artifact_digest: Some(artifact_digest.clone()),
+    };
+    let event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: policy_input.subject.clone(),
+        kind: EventKind::CapabilityConsumed,
+        payload: serde_json::to_value(&CapabilityEvent::CapabilityConsumed(consumed_typed)).unwrap(),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+
+    let mut store_guard = store.lock().unwrap();
+    if let Err(e) = store_guard.append(event) {
+        return HttpResponse::InternalServerError().body(format!("capability consume append failed: {e:?}"));
+    }
+
+    HttpResponse::Ok().json(json!({ "result": "capability consumed", "capability_id": capability_id.to_string(), "policy_digest": consent.policy_digest, "input_digest": consent.input_digest }))
 }
 
 #[post("/genesis")]
@@ -534,7 +599,7 @@ pub async fn auth_login(
         expires_at_utc: expires_at,
         scope: "session".to_string(),
         actions: vec!["whoami".to_string()],
-        constraints: Some(json!({"challenge": challenge})),
+        constraints: Some(CapabilityConstraints { allowed_artifact_digests: None }),
         issued_by: "sentinel_service".to_string(),
         token_signature: vec![],
     };
@@ -827,7 +892,9 @@ pub async fn auth_login(
         let scope = body.get("scope").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "session".to_string());
         let actions = body.get("actions").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<String>>()).unwrap_or_else(|| vec!["whoami".to_string()]);
         let ttl_minutes = body.get("ttl_minutes").and_then(|v| v.as_i64()).unwrap_or(30);
-        let constraints = body.get("constraints").cloned().unwrap_or(json!({}));
+        // Accept typed allowed_artifact_digests for artifact-binding constraints
+        let allowed_artifact_digests = body.get("allowed_artifact_digests").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<String>>());
+        let constraints_typed = CapabilityConstraints { allowed_artifact_digests: allowed_artifact_digests.clone() };
         let simulate_append_failure = body.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false);
 
         // 1) Build PolicyInput
@@ -888,7 +955,7 @@ pub async fn auth_login(
             expires_at_utc: expires_at,
             scope: scope.clone(),
             actions: actions.clone(),
-            constraints: Some(constraints.clone()),
+            constraints: Some(constraints_typed.clone()),
             issued_by: issuer.clone(),
             token_signature: vec![],
         };

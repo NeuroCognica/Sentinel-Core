@@ -216,6 +216,7 @@ pub enum EventKind {
     ConsentDenied,
     EffectExecuted,
     CapabilityIssued,
+    CapabilityConsumed,
     ArtifactRegistered,
     ArtifactValidated,
     ArtifactRevoked,

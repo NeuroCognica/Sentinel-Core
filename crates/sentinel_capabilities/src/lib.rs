@@ -51,14 +51,35 @@ impl CapabilityState {
                     state.revoked.insert(capability_id);
                     state.active.remove(&capability_id);
                 }
-                CapabilityEvent::CapabilityConsumed(CapabilityConsumed {
-                    capability_id, ..
-                }) => {
+                CapabilityEvent::CapabilityConsumed(CapabilityConsumed { capability_id, artifact_digest, .. }) => {
                     if !state.active.contains_key(&capability_id) {
                         return Err(format!(
                             "Cannot consume unknown or revoked capability: {}",
                             capability_id
                         ));
+                    }
+                    // Enforce artifact-binding constraints: absence of constraints or allowed_artifact_digests is a DENY
+                    let cap = state.active.get(&capability_id).expect("checked presence above");
+                    // If there are no constraints at all, deny consumption (absence != wildcard)
+                    if cap.constraints.is_none() {
+                        return Err(format!("Capability {} has no constraints; consumption denied", capability_id));
+                    }
+                    let constraints = cap.constraints.as_ref().unwrap();
+                    // If allowed_artifact_digests is absent, deny as well
+                    let allowed = match &constraints.allowed_artifact_digests {
+                        Some(a) => a,
+                        None => return Err(format!("Capability {} has no allowed_artifact_digests; consumption denied", capability_id)),
+                    };
+                    // If capability has allowed_artifact_digests, the consume event MUST include an artifact_digest
+                    match &artifact_digest {
+                        Some(ad) => {
+                            if !allowed.contains(ad) {
+                                return Err(format!("Capability {} not allowed for artifact {}", capability_id, ad));
+                            }
+                        }
+                        None => {
+                            return Err(format!("Capability {} requires artifact_digest in consume event", capability_id));
+                        }
                     }
                     if state.consumed.contains(&capability_id) {
                         return Err(format!("Double-consume forbidden: {}", capability_id));
