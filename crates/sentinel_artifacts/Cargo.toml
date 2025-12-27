@@ -1,0 +1,17 @@
+[package]
+name = "sentinel_artifacts"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+uuid = { version = "1.4", features = ["v4","serde"] }
+time = { version = "0.3", features = ["macros","serde"] }
+
+[dev-dependencies]
+# keep tests simple
+
+[lib]
+name = "sentinel_artifacts"
+path = "src/lib.rs"
+
