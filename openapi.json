@@ -1,0 +1,452 @@
+{
+  "components": {
+    "responses": {
+      "INVARIANT_BREACH_500": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SentinelError"
+            }
+          }
+        },
+        "description": "Refusal to Lie — Internal invariant could not be upheld.",
+        "x-sentinel-name": "Refusal to Lie",
+        "x-truth-contract": {
+          "codex_seal_created": false,
+          "partial_effects_forbidden": true
+        }
+      },
+      "MALFORMED_ENVELOPE_400": {
+        "content": {
+          "application/json": {
+            "examples": {
+              "brokenForm": {
+                "value": {
+                  "code": 400,
+                  "details": {
+                    "reason": "missing field: payload"
+                  },
+                  "error": "MALFORMED_ENVELOPE",
+                  "message": "The request payload is not a canonical envelope.",
+                  "name": "Broken Form",
+                  "trace_id": "..."
+                }
+              }
+            },
+            "schema": {
+              "$ref": "#/components/schemas/SentinelError"
+            }
+          }
+        },
+        "description": "Broken Form — The request could not be interpreted as a canonical envelope.",
+        "x-sentinel-name": "Broken Gate",
+        "x-truth-contract": {
+          "consent_recorded": false,
+          "events_appended": false,
+          "policy_evaluated": false
+        }
+      },
+      "TEMPORAL_VIOLATION_409": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SentinelError"
+            }
+          }
+        },
+        "description": "Broken Time — Temporal integrity violated.",
+        "x-sentinel-name": "Broken Time",
+        "x-truth-contract": {
+          "codex_seal_created": false,
+          "effects_executed": false
+        }
+      },
+      "UNPROVEN_IDENTITY_401": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SentinelError"
+            }
+          }
+        },
+        "description": "Unspoken Name — Identity not cryptographically proven.",
+        "x-sentinel-name": "Unspoken Name",
+        "x-truth-contract": {
+          "consent_recorded": false,
+          "events_appended": false,
+          "policy_evaluated": false
+        }
+      },
+      "WITHHELD_AUTHORITY_403": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SentinelError"
+            }
+          }
+        },
+        "description": "Closed Gate — Authenticated but authority denied.",
+        "x-sentinel-name": "Closed Gate",
+        "x-truth-contract": {
+          "consent_recorded": true,
+          "effects_executed": false,
+          "policy_evaluated": true
+        }
+      }
+    },
+    "schemas": {
+      "CanonicalEnvelope": {
+        "properties": {
+          "actor_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "key_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "signature": {
+            "description": "Base16 or Base64 signature bytes",
+            "type": "string"
+          },
+          "timestamp_utc": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "key_id",
+          "nonce",
+          "timestamp_utc",
+          "payload",
+          "signature"
+        ],
+        "type": "object"
+      },
+      "SentinelError": {
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "object"
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "EnvelopeAuth": {
+        "bearerFormat": "CanonicalEnvelope",
+        "description": "Canonical envelope required: server canonicalizes envelope and verifies signature.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "title": "sentinel_api",
+    "version": "0.1.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/artifacts/register": {
+      "post": {
+        "operationId": "artifact_register",
+        "responses": {
+          "200": {
+            "description": "Artifact registered; id returned"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/artifacts/use": {
+      "post": {
+        "operationId": "artifact_use",
+        "responses": {
+          "200": {
+            "description": "Artifact access granted"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/auth/challenge": {
+      "post": {
+        "operationId": "auth_challenge",
+        "responses": {
+          "200": {
+            "description": "Challenge issued"
+          },
+          "400": {
+            "description": "missing actor_id or key_id"
+          },
+          "401": {
+            "description": "unknown or revoked key"
+          },
+          "500": {
+            "description": "identity state load or append failure"
+          }
+        },
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "auth_login",
+        "responses": {
+          "200": {
+            "description": "Authenticate and issue capability"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/capabilities/issue": {
+      "post": {
+        "operationId": "capability_issue",
+        "responses": {
+          "200": {
+            "description": "Capability issued"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/genesis": {
+      "post": {
+        "operationId": "genesis",
+        "responses": {
+          "200": {
+            "description": "Genesis completed"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/policy/evaluate": {
+      "post": {
+        "operationId": "policy_evaluate",
+        "responses": {
+          "200": {
+            "description": "Policy evaluation result"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    },
+    "/privileged/action": {
+      "post": {
+        "operationId": "privileged_action",
+        "responses": {
+          "200": {
+            "description": "Effect executed"
+          },
+          "400": {
+            "description": "Malformed envelope"
+          },
+          "401": {
+            "description": "Unproven identity"
+          },
+          "403": {
+            "description": "Withheld authority"
+          },
+          "409": {
+            "description": "Temporal violation"
+          },
+          "500": {
+            "description": "Invariant breach"
+          }
+        },
+        "security": [
+          {
+            "EnvelopeAuth": []
+          }
+        ],
+        "tags": [
+          "crate"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Privileged, event-sourced endpoints",
+      "name": "Sentinel API"
+    }
+  ]
+}
