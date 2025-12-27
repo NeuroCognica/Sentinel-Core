@@ -18,6 +18,8 @@ use sentinel_identity::{ActorId, KeyId, SignedEnvelope, SignatureBytes, Signatur
 use sentinel_policy::{Policy, PolicyInput, make_policy_evaluated};
 use sentinel_policy::event::Decision as PolicyDecision;
 pub mod middleware;
+mod consent;
+use consent::{enforce_consent, ConsentContext};
 
 #[get("/health")]
 pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
@@ -331,7 +333,29 @@ pub async fn auth_login(
         Err(_) => return HttpResponse::InternalServerError().body("nonce append task failed"),
     }
 
-    // 7) Issue session capability (signed by service key)
+    // 7) Build a PolicyInput for auth_login and enforce consent (fail-closed)
+    let policy_input = PolicyInput {
+        subject: envelope.actor_id.to_string(),
+        action: "auth_login".to_string(),
+        resource: "session".to_string(),
+        context: json!({ "challenge": challenge }),
+    };
+    // Use a built-in allow policy for login (handlers may later use configured policies)
+    let policy = Policy {
+        id: "auth_login_allow".to_string(),
+        version: "v0".to_string(),
+        statements: vec![sentinel_policy::policy::Statement {
+            when: vec![sentinel_policy::policy::Condition { field: "action".to_string(), op: sentinel_policy::policy::Op::Eq, value: "auth_login".to_string() }],
+            effect: sentinel_policy::policy::Effect::Allow,
+            rationale: "allow login".to_string(),
+        }],
+    };
+    let consent = match enforce_consent(&store, &policy, &policy_input).await {
+        Ok(ctx) => ctx,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("consent enforcement failed: {e}")),
+    };
+
+    // 8) Issue session capability (signed by service key) — effect happens only after consent
     let keystore = match Keystore::load_or_create(std::path::PathBuf::from("./sentinel_service.key")) {
         Ok(ks) => ks,
         Err(e) => return HttpResponse::InternalServerError().body(format!("service key load failed: {e}")),
@@ -369,6 +393,21 @@ pub async fn auth_login(
     let mut store_guard = store.lock().unwrap();
     if let Err(e) = store_guard.append(cap_event) {
         return HttpResponse::InternalServerError().body(format!("capability event append failed: {e:?}"));
+    }
+
+    // Append EffectExecuted event durable
+    let effect_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: envelope.actor_id.to_string(),
+        kind: EventKind::EffectExecuted,
+        payload: json!({ "effect": "issue_capability", "policy_digest": consent.policy_digest, "input_digest": consent.input_digest }),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    // use append (non-sync) here to avoid double-syncing
+    if let Err(e) = store_guard.append(effect_event) {
+        return HttpResponse::InternalServerError().body(format!("effect event append failed: {e:?}"));
     }
 
     HttpResponse::Ok().json(cap)

@@ -1,6 +1,7 @@
 use actix_web::{test, App};
 use tempfile::TempDir;
 use serde_json::json;
+use sentinel_store::EventStore;
 
 #[actix_rt::test]
 async fn test_challenge_login_happy_path() {
@@ -95,4 +96,22 @@ async fn test_challenge_login_happy_path() {
     }
     let cap: sentinel_core::Capability = test::read_body_json(resp).await;
     assert_eq!(cap.actor_id, actor_id);
+
+    // Verify consent and effect events were recorded
+    let s = store_data.lock().unwrap();
+    let events = s.iter().expect("iter");
+    let mut found_pe = false;
+    let mut found_consent = false;
+    let mut found_effect = false;
+    for rec in events {
+        match rec.kind {
+            sentinel_store::EventKind::PolicyEvaluated => found_pe = true,
+            sentinel_store::EventKind::ConsentGranted => found_consent = true,
+            sentinel_store::EventKind::EffectExecuted => found_effect = true,
+            _ => {}
+        }
+    }
+    assert!(found_pe, "PolicyEvaluated missing");
+    assert!(found_consent, "ConsentGranted missing");
+    assert!(found_effect, "EffectExecuted missing");
 }
