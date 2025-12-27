@@ -179,6 +179,48 @@ pub async fn artifact_use(
         }
     };
 
+    let simulate_append_failure = body.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false);
+    if simulate_append_failure {
+        return HttpResponse::InternalServerError().body("simulated append failure");
+    }
+
+    // Validate capability existence and constraints before appending consume event.
+    let store_guard = store.lock().unwrap();
+    let events = match store_guard.iter() {
+        Ok(evts) => evts,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("event log read failed: {e:?}")),
+    };
+    let mut found_cap: Option<Capability> = None;
+    for rec in events.iter() {
+        if let sentinel_store::EventKind::CapabilityIssued = rec.kind {
+            if let Ok(ce) = serde_json::from_value::<CapabilityEvent>(rec.payload.clone()) {
+                if let CapabilityEvent::CapabilityIssued(ci) = ce {
+                    if ci.capability.capability_id == capability_id {
+                        found_cap = Some(ci.capability);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if found_cap.is_none() {
+        return HttpResponse::NotFound().body("capability not found");
+    }
+    let cap = found_cap.unwrap();
+    if cap.constraints.is_none() {
+        return HttpResponse::Forbidden().body("capability lacks constraints");
+    }
+    let constraints = cap.constraints.unwrap();
+    let allowed = match constraints.allowed_artifact_digests {
+        Some(a) => a,
+        None => return HttpResponse::Forbidden().body("capability has no allowed_artifact_digests"),
+    };
+    if !allowed.contains(&artifact_digest) {
+        return HttpResponse::Forbidden().body("artifact not allowed by capability");
+    }
+
+    drop(store_guard);
+
     // Append CapabilityConsumed event (must include artifact_digest)
     let consumed_typed = CapabilityConsumed {
         capability_id,
@@ -199,6 +241,28 @@ pub async fn artifact_use(
     let mut store_guard = store.lock().unwrap();
     if let Err(e) = store_guard.append(event) {
         return HttpResponse::InternalServerError().body(format!("capability consume append failed: {e:?}"));
+    }
+
+    // Create and append CodexSeal
+    let seal = sentinel_artifacts::CodexSeal::new(
+        artifact_digest.clone(),
+        consent.policy_digest.clone(),
+        consent.input_digest.clone(),
+        Uuid::new_v4(),
+        policy_input.subject.clone(),
+        OffsetDateTime::now_utc(),
+    );
+    let seal_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: policy_input.subject.clone(),
+        kind: EventKind::CodexSealCreated,
+        payload: serde_json::to_value(&ArtifactEvent::CodexSealCreated { seal }).unwrap(),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store_guard.append(seal_event) {
+        return HttpResponse::InternalServerError().body(format!("codex seal append failed: {e:?}"));
     }
 
     HttpResponse::Ok().json(json!({ "result": "capability consumed", "capability_id": capability_id.to_string(), "policy_digest": consent.policy_digest, "input_digest": consent.input_digest }))
