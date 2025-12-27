@@ -1,0 +1,134 @@
+openapi: 3.0.3
+info:
+  title: Sentinel Boundary Semantics (components)
+  version: 2025-12-26
+components:
+  schemas:
+    CanonicalEnvelope:
+      type: object
+      required: [actor_id, key_id, nonce, timestamp_utc, payload, signature]
+      properties:
+        actor_id:
+          type: string
+          format: uuid
+        key_id:
+          type: string
+          format: uuid
+        nonce:
+          type: string
+        timestamp_utc:
+          type: string
+          format: date-time
+        payload:
+          type: object
+        signature:
+          type: string
+          description: Base16 or Base64 signature bytes
+
+    SentinelError:
+      type: object
+      properties:
+        code:
+          type: integer
+        error:
+          type: string
+        name:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        trace_id:
+          type: string
+
+  responses:
+    MALFORMED_ENVELOPE_400:
+      description: Broken Form — The request could not be interpreted as a canonical envelope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SentinelError'
+          examples:
+            brokenForm:
+              value:
+                code: 400
+                error: MALFORMED_ENVELOPE
+                name: Broken Form
+                message: The request payload is not a canonical envelope.
+                details: { reason: "missing field: payload" }
+                trace_id: "..."
+      x-sentinel-name: Broken Gate
+      x-truth-contract:
+        policy_evaluated: false
+        consent_recorded: false
+        events_appended: false
+
+    UNPROVEN_IDENTITY_401:
+      description: Unspoken Name — Identity not cryptographically proven.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SentinelError'
+      x-sentinel-name: Unspoken Name
+      x-truth-contract:
+        policy_evaluated: false
+        consent_recorded: false
+        events_appended: false
+
+    WITHHELD_AUTHORITY_403:
+      description: Closed Gate — Authenticated but authority denied.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SentinelError'
+      x-sentinel-name: Closed Gate
+      x-truth-contract:
+        policy_evaluated: true
+        consent_recorded: true
+        effects_executed: false
+
+    TEMPORAL_VIOLATION_409:
+      description: Broken Time — Temporal integrity violated.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SentinelError'
+      x-sentinel-name: Broken Time
+      x-truth-contract:
+        effects_executed: false
+        codex_seal_created: false
+
+    INVARIANT_BREACH_500:
+      description: Refusal to Lie — Internal invariant could not be upheld.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SentinelError'
+      x-sentinel-name: Refusal to Lie
+      x-truth-contract:
+        partial_effects_forbidden: true
+        codex_seal_created: false
+
+  securitySchemes:
+    EnvelopeAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: "CanonicalEnvelope"
+      description: >-
+        Canonical envelope required: server canonicalizes envelope and verifies signature.
+
+x-extensions:
+  sentinel-annotations:
+    endpoint_roles:
+      observational: "read-only, safe"
+      authenticated: "requires envelope authentication"
+      consent-gated: "requires policy evaluation + consent events"
+      provenance-sealing: "appends PolicyEvaluated + Consent + EffectExecuted events"
+
+# Example usage (to be referenced by endpoints when generating OpenAPI):
+# responses:
+#   400: { $ref: '#/components/responses/MALFORMED_ENVELOPE_400' }
+#   401: { $ref: '#/components/responses/UNPROVEN_IDENTITY_401' }
+#   403: { $ref: '#/components/responses/WITHHELD_AUTHORITY_403' }
+#   409: { $ref: '#/components/responses/TEMPORAL_VIOLATION_409' }
+#   500: { $ref: '#/components/responses/INVARIANT_BREACH_500' }
