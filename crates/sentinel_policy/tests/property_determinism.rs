@@ -28,7 +28,7 @@ fn arb_policy() -> impl Strategy<Value = Policy> {
 
 fn arb_input() -> impl Strategy<Value = PolicyInput> {
     (prop::string::string_regex("[a-zA-Z0-9_]{1,8}").unwrap(), prop::string::string_regex("[a-zA-Z0-9_]{1,8}").unwrap(), prop::string::string_regex("[a-zA-Z0-9_]{1,8}").unwrap())
-        .prop_map(|(subject, action, resource)| PolicyInput { subject, action, resource, context: json!({}) })
+        .prop_map(|(subject, action, resource)| PolicyInput { subject, action, resource, context: json!({}), envelope_digest: None })
 }
 
 proptest! {

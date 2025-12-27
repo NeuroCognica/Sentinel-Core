@@ -14,6 +14,8 @@ pub struct PolicyEvaluated {
     pub policy_digest: String,
     pub policy_version: String,
     pub input_digest: String,
+    /// Optional envelope digest from the input (non-authoritative audit field)
+    pub envelope_digest: Option<String>,
     pub decision: Decision,
     pub matched_statement_index: Option<usize>,
     pub rationale: String,
@@ -92,6 +94,7 @@ pub fn make_policy_evaluated(
         policy_digest: p_digest,
         policy_version: policy.version.clone(),
         input_digest: i_digest,
+        envelope_digest: input.envelope_digest.clone(),
         decision,
         matched_statement_index: matched,
         rationale,

@@ -50,6 +50,9 @@ pub struct PolicyInput {
     pub action: String,
     pub resource: String,
     pub context: serde_json::Value,
+    /// Optional canonical envelope digest (H1).
+    #[serde(default)]
+    pub envelope_digest: Option<String>,
 }
 
 /// Deterministic decision returned by evaluation

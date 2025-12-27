@@ -57,6 +57,7 @@ mod tests {
             action: "read".to_string(),
             resource: "r".to_string(),
             context: json!({}),
+            envelope_digest: None,
         };
         let a = evaluate(&p, &inp);
         let b = evaluate(&p, &inp);
@@ -84,6 +85,7 @@ mod tests {
             action: "read".to_string(),
             resource: "r".to_string(),
             context: serde_json::json!({}),
+            envelope_digest: None,
         };
         let ts = chrono::Utc.datetime_from_str("2025-12-25T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ").unwrap();
         let ev1 = make_policy_evaluated(&p, &inp, "v0", ts);

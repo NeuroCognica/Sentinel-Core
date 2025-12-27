@@ -44,7 +44,7 @@ statements:
     assert_eq!(policy_digest(&from_yaml), expected_allow_read);
 
     // Input digest regression
-    let inp = PolicyInput { subject: "alice".to_string(), action: "read".to_string(), resource: "r".to_string(), context: json!({}) };
+    let inp = PolicyInput { subject: "alice".to_string(), action: "read".to_string(), resource: "r".to_string(), context: json!({}), envelope_digest: None };
     assert_eq!(input_digest(&inp), expected_input);
 
     // Different JSON formatting of input must not change digest

@@ -68,6 +68,7 @@ pub async fn artifact_register(
         action: "artifact_register".to_string(),
         resource: "artifact".to_string(),
         context: json!({ "artifact_digest": artifact_digest.clone(), "artifact_type": artifact_type.clone() }),
+        envelope_digest: None,
     };
 
     // default policy: allow
@@ -162,6 +163,7 @@ pub async fn artifact_use(
         action: "capability_consume".to_string(),
         resource: "artifact_use".to_string(),
         context: json!({ "capability_id": capability_id.to_string(), "artifact_digest": artifact_digest.clone() }),
+        envelope_digest: None,
     };
 
     // Default allow policy for now
@@ -373,6 +375,7 @@ pub async fn genesis(
         action: "genesis".to_string(),
         resource: "system".to_string(),
         context: json!({ "is_initial_boot": is_initial_boot, "operator_present": operator_present, "simulate_append_failure": simulate_append_failure }),
+        envelope_digest: None,
     };
 
     // If caller provided an explicit policy object, use it; otherwise, default to a conservative allow for genesis action.
@@ -632,6 +635,7 @@ pub async fn auth_login(
         action: "auth_login".to_string(),
         resource: "session".to_string(),
         context: json!({ "challenge": challenge }),
+        envelope_digest: None,
     };
     // Use a built-in allow policy for login (handlers may later use configured policies)
     let policy = Policy {
@@ -967,6 +971,7 @@ pub async fn auth_login(
             action: "capability_issue".to_string(),
             resource: scope.clone(),
             context: json!({ "subject": subject.clone(), "scope": scope.clone(), "actions": actions.clone(), "ttl_minutes": ttl_minutes }),
+            envelope_digest: None,
         };
 
         // Use provided policy or default allow for capability issuance

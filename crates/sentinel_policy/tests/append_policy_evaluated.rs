@@ -17,6 +17,7 @@ fn append_policy_evaluated_and_verify_chain() {
         action: "read".to_string(),
         resource: "artifact:foo".to_string(),
         context: serde_json::json!({}),
+        envelope_digest: None,
     };
 
     let ts = Utc::now();
