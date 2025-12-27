@@ -1,5 +1,7 @@
 use actix_web::{test, App};
 use serde_json::json;
+use uuid::Uuid;
+use sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex;
 use tempfile::TempDir;
 use sentinel_store::EventStore;
 
@@ -12,14 +14,20 @@ async fn test_capability_allow_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::capability_issue),
     )
     .await;
 
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000001", "subject": "00000000-0000-0000-0000-000000000002", "scope": "session", "actions": ["whoami"] });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000001", "subject": "00000000-0000-0000-0000-000000000002", "scope": "session", "actions": ["whoami"] }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -54,6 +62,7 @@ async fn test_capability_deny_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::capability_issue),
     )
@@ -67,9 +76,14 @@ async fn test_capability_deny_path() {
         ]
     });
 
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000010", "subject": "00000000-0000-0000-0000-000000000011", "scope": "session", "actions": ["whoami"], "policy": policy });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000010", "subject": "00000000-0000-0000-0000-000000000011", "scope": "session", "actions": ["whoami"], "policy": policy }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -104,14 +118,20 @@ async fn test_capability_append_failure_aborts() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::capability_issue),
     )
     .await;
 
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000020", "subject": "00000000-0000-0000-0000-000000000021", "scope": "session", "actions": ["whoami"], "simulate_append_failure": true });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000020", "subject": "00000000-0000-0000-0000-000000000021", "scope": "session", "actions": ["whoami"], "simulate_append_failure": true }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_server_error());

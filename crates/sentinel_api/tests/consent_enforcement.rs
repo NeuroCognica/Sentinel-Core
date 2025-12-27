@@ -1,5 +1,7 @@
 use actix_web::{test, App};
 use serde_json::json;
+use uuid::Uuid;
+use sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex;
 use tempfile::TempDir;
 use sentinel_store::EventStore;
 
@@ -12,6 +14,7 @@ async fn test_consent_allow_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::privileged_action),
     )
@@ -26,9 +29,14 @@ async fn test_consent_allow_path() {
     });
     let input = json!({ "subject": "alice", "action": "do", "resource": "r", "context": {} });
 
+    let inner = json!({ "policy": policy, "input": input });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/privileged/action", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/privileged/action")
-        .set_json(&json!({ "policy": policy, "input": input }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -60,6 +68,7 @@ async fn test_consent_deny_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::privileged_action),
     )
@@ -74,9 +83,14 @@ async fn test_consent_deny_path() {
     });
     let input = json!({ "subject": "alice", "action": "do", "resource": "r", "context": {} });
 
+    let inner = json!({ "policy": policy, "input": input });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/privileged/action", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/privileged/action")
-        .set_json(&json!({ "policy": policy, "input": input }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -109,6 +123,7 @@ async fn test_consent_append_failure_aborts() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::privileged_action),
     )
@@ -123,9 +138,14 @@ async fn test_consent_append_failure_aborts() {
     });
     let input = json!({ "subject": "alice", "action": "do", "resource": "r", "context": { "simulate_append_failure": true } });
 
+    let inner = json!({ "policy": policy, "input": input });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/privileged/action", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/privileged/action")
-        .set_json(&json!({ "policy": policy, "input": input }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_server_error());

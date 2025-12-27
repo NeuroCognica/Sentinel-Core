@@ -49,14 +49,14 @@ pub fn compute_envelope_digest_hex(
     method: &str,
     path: &str,
     nonce: &str,
-    body: Value,
+    body: &Value,
 ) -> String {
     let payload = serde_json::json!({
         "v": 1,
         "method": method,
         "path": path,
         "nonce": nonce,
-        "body": canonicalize_json(body),
+        "body": canonicalize_json(body.clone()),
     });
 
     let bytes = canonical_json_bytes(payload);
@@ -150,7 +150,7 @@ where
             };
 
             let path = req.path().to_string();
-            let expected = compute_envelope_digest_hex(req.method().as_str(), &path, nonce, body);
+            let expected = compute_envelope_digest_hex(req.method().as_str(), &path, nonce, &body);
 
             if !constant_time_eq_hex(provided_digest, &expected) {
                 let resp = HttpResponse::BadRequest().body("envelope digest mismatch").map_into_boxed_body();
@@ -162,7 +162,9 @@ where
                 nonce: nonce.to_string(),
             });
 
-            req.set_payload(bytes.into());
+            // Replace the request payload with the canonicalized inner body bytes
+            let body_bytes = serde_json::to_vec(&body).map_err(|_| ErrorBadRequest("body serialize error"))?;
+            req.set_payload(body_bytes.into());
 
             svc.call(req).await
         })

@@ -12,7 +12,7 @@ async fn echo(req: actix_web::HttpRequest) -> impl Responder {
 }
 
 fn make_envelope(method: &str, path: &str, nonce: &str, body: serde_json::Value) -> serde_json::Value {
-    let digest = compute_envelope_digest_hex(method, path, nonce, body.clone());
+    let digest = compute_envelope_digest_hex(method, path, nonce, &body);
     json!({ "v": 1, "method": method, "path": path, "nonce": nonce, "body": body, "digest": digest })
 }
 

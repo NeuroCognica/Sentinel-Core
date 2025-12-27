@@ -15,6 +15,7 @@ async fn test_challenge_login_happy_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::health)
             .service(sentinel_api::genesis)
@@ -85,9 +86,15 @@ async fn test_challenge_login_happy_path() {
         signature: sig.to_bytes().to_vec(),
     };
 
+    // Wrap the signed envelope in the nonce/digest/body envelope expected by the middleware.
+    let inner = serde_json::to_value(&envelope).unwrap();
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let digest = sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex("POST", "/auth/login", &nonce, &inner);
+    let wrapper = serde_json::json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/auth/login")
-        .set_json(&envelope)
+        .set_json(&wrapper)
         .to_request();
     let resp = test::call_service(&app, req).await;
     if !resp.status().is_success() {

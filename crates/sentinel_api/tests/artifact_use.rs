@@ -1,5 +1,7 @@
 use actix_web::{test, App};
 use serde_json::json;
+use uuid::Uuid;
+use sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex;
 use tempfile::TempDir;
 use sentinel_store::EventStore;
 use sentinel_artifacts::ArtifactEvent;
@@ -13,6 +15,7 @@ async fn artifact_use_allow_emits_codex_seal() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register)
             .service(sentinel_api::capability_issue)
@@ -21,17 +24,27 @@ async fn artifact_use_allow_emits_codex_seal() {
     .await;
 
     // register artifact
+    let inner = json!({ "artifact_digest": "ad:deadbeef", "artifact_type": "executable", "subject": "actor-1" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "ad:deadbeef", "artifact_type": "executable", "subject": "actor-1" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
     // issue capability bound to artifact
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000001", "subject": "actor-1", "scope": "session", "actions": ["use"], "allowed_artifact_digests": ["ad:deadbeef"] });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000001", "subject": "actor-1", "scope": "session", "actions": ["use"], "allowed_artifact_digests": ["ad:deadbeef"] }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -39,9 +52,14 @@ async fn artifact_use_allow_emits_codex_seal() {
     let cap_id = cap.get("capability_id").and_then(|v| v.as_str()).expect("cap id");
 
     // call artifact_use
+    let inner = json!({ "capability_id": cap_id, "artifact_digest": "ad:deadbeef", "subject": "actor-1" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/use", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/use")
-        .set_json(&json!({ "capability_id": cap_id, "artifact_digest": "ad:deadbeef", "subject": "actor-1" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -79,6 +97,7 @@ async fn artifact_use_denied_without_artifact_binding() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register)
             .service(sentinel_api::capability_issue)
@@ -87,17 +106,27 @@ async fn artifact_use_denied_without_artifact_binding() {
     .await;
 
     // register artifact
+    let inner = json!({ "artifact_digest": "ad:beefdead", "artifact_type": "executable", "subject": "actor-2" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "ad:beefdead", "artifact_type": "executable", "subject": "actor-2" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
     // issue capability WITHOUT binding
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000010", "subject": "actor-2", "scope": "session", "actions": ["use"] });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000010", "subject": "actor-2", "scope": "session", "actions": ["use"] }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -105,9 +134,14 @@ async fn artifact_use_denied_without_artifact_binding() {
     let cap_id = cap.get("capability_id").and_then(|v| v.as_str()).expect("cap id");
 
     // attempt artifact_use
+    let inner = json!({ "capability_id": cap_id, "artifact_digest": "ad:beefdead", "subject": "actor-2" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/use", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/use")
-        .set_json(&json!({ "capability_id": cap_id, "artifact_digest": "ad:beefdead", "subject": "actor-2" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -126,6 +160,7 @@ async fn artifact_use_missing_digest_fails_closed() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_use)
             .service(sentinel_api::capability_issue),
@@ -133,9 +168,14 @@ async fn artifact_use_missing_digest_fails_closed() {
     .await;
 
     // issue a capability directly (we don't need binding)
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000020", "subject": "actor-3", "scope": "session", "actions": ["use"] });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000020", "subject": "actor-3", "scope": "session", "actions": ["use"] }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -143,9 +183,14 @@ async fn artifact_use_missing_digest_fails_closed() {
     let cap_id = cap.get("capability_id").and_then(|v| v.as_str()).expect("cap id");
 
     // call artifact_use without artifact_digest
+    let inner = json!({ "capability_id": cap_id, "subject": "actor-3" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/use", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/use")
-        .set_json(&json!({ "capability_id": cap_id, "subject": "actor-3" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 400);
@@ -164,6 +209,7 @@ async fn artifact_use_append_failure_fails_closed() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register)
             .service(sentinel_api::capability_issue)
@@ -172,17 +218,27 @@ async fn artifact_use_append_failure_fails_closed() {
     .await;
 
     // register artifact
+    let inner = json!({ "artifact_digest": "ad:deadbeef2", "artifact_type": "executable", "subject": "actor-4" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "ad:deadbeef2", "artifact_type": "executable", "subject": "actor-4" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
 
     // issue capability bound to artifact
+    let inner = json!({ "issuer": "00000000-0000-0000-0000-000000000030", "subject": "actor-4", "scope": "session", "actions": ["use"], "allowed_artifact_digests": ["ad:deadbeef2"] });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/capabilities/issue", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/capabilities/issue")
-        .set_json(&json!({ "issuer": "00000000-0000-0000-0000-000000000030", "subject": "actor-4", "scope": "session", "actions": ["use"], "allowed_artifact_digests": ["ad:deadbeef2"] }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -190,9 +246,14 @@ async fn artifact_use_append_failure_fails_closed() {
     let cap_id = cap.get("capability_id").and_then(|v| v.as_str()).expect("cap id");
 
     // call artifact_use with simulate_append_failure
+    let inner = json!({ "capability_id": cap_id, "artifact_digest": "ad:deadbeef2", "subject": "actor-4", "simulate_append_failure": true });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/use", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/use")
-        .set_json(&json!({ "capability_id": cap_id, "artifact_digest": "ad:deadbeef2", "subject": "actor-4", "simulate_append_failure": true }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_server_error());

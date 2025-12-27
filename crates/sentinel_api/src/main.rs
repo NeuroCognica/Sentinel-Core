@@ -1,8 +1,10 @@
 use actix_web::{web, App, HttpServer};
+use sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware;
 use sentinel_store::FileEventStore;
 use std::sync::Mutex;
 
-mod lib;
+// Use the library crate's exported items rather than declaring a local `lib` module.
+// `lib.rs` is compiled as the library target; refer to it via the crate name.
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -14,12 +16,13 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
+            .wrap(EnvelopeDigestMiddleware)
             .app_data(store.clone())
-            .service(lib::health)
-            .service(lib::genesis)
-            .service(lib::auth_challenge)
-            .service(lib::auth_login)
-            .service(lib::policy_evaluate)
+            .service(sentinel_api::health)
+            .service(sentinel_api::genesis)
+            .service(sentinel_api::auth_challenge)
+            .service(sentinel_api::auth_login)
+            .service(sentinel_api::policy_evaluate)
     })
     .bind(bind)?
     .run()

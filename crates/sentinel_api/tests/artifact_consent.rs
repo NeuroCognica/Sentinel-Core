@@ -1,5 +1,7 @@
 use actix_web::{test, App};
 use serde_json::json;
+use uuid::Uuid;
+use sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex;
 use tempfile::TempDir;
 use sentinel_store::EventStore;
 
@@ -12,17 +14,25 @@ async fn test_artifact_allow_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register),
     )
     .await;
+    let inner = json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-1" });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
 
     let req = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-1" }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert!(resp.status().is_success());
+    if !resp.status().is_success() {
+        let body = test::read_body(resp).await;
+        panic!("unexpected response: {}", std::str::from_utf8(&body).unwrap_or("<binary>"));
+    }
 
     let s = store_data.lock().unwrap();
     let events = s.iter().expect("iter");
@@ -51,6 +61,7 @@ async fn test_artifact_deny_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register),
     )
@@ -64,9 +75,14 @@ async fn test_artifact_deny_path() {
         ]
     });
 
+    let inner = json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-2", "policy": policy });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-2", "policy": policy }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -98,14 +114,20 @@ async fn test_artifact_append_failure_aborts() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register),
     )
     .await;
 
+    let inner = json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-3", "simulate_append_failure": true });
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce, &inner);
+    let envelope = json!({ "nonce": nonce, "digest": digest, "body": inner });
+
     let req = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-3", "simulate_append_failure": true }))
+        .set_json(&envelope)
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_server_error());
@@ -125,22 +147,33 @@ async fn test_artifact_idempotence() {
 
     let app = test::init_service(
         App::new()
+            .wrap(sentinel_api::middleware::envelope_digest::EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::artifact_register),
     )
     .await;
 
+    let inner1 = json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-4" });
+    let nonce1 = Uuid::new_v4().to_string();
+    let digest1 = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce1, &inner1);
+    let envelope1 = json!({ "nonce": nonce1, "digest": digest1, "body": inner1 });
+
     let req1 = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-4" }))
+        .set_json(&envelope1)
         .to_request();
     let resp1 = test::call_service(&app, req1).await;
     assert!(resp1.status().is_success());
     let body1: serde_json::Value = test::read_body_json(resp1).await;
 
+    let inner2 = json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-4" });
+    let nonce2 = Uuid::new_v4().to_string();
+    let digest2 = compute_envelope_digest_hex("POST", "/artifacts/register", &nonce2, &inner2);
+    let envelope2 = json!({ "nonce": nonce2, "digest": digest2, "body": inner2 });
+
     let req2 = test::TestRequest::post()
         .uri("/artifacts/register")
-        .set_json(&json!({ "artifact_digest": "deadbeef", "artifact_type": "executable", "subject": "actor-4" }))
+        .set_json(&envelope2)
         .to_request();
     let resp2 = test::call_service(&app, req2).await;
     assert!(resp2.status().is_success());

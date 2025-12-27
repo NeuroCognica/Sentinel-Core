@@ -1,4 +1,6 @@
-use actix_web::{get, post, web, App, HttpResponse, Responder};
+use actix_web::{get, post, web, App, HttpRequest, HttpResponse, Responder};
+use actix_web::HttpMessage;
+use crate::middleware::envelope_digest::VerifiedEnvelopeMeta;
 use actix_web::rt::task::spawn_blocking;
 use chrono::Utc;
 use serde_json::json;
@@ -46,9 +48,15 @@ pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
 #[post("/artifacts/register")]
 pub async fn artifact_register(
     store: web::Data<Mutex<FileEventStore>>,
+    req_http: HttpRequest,
     req: web::Json<serde_json::Value>,
 ) -> impl Responder {
     let body = req.into_inner();
+
+    let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+        Some(m) => m.clone(),
+        None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+    };
 
     let artifact_digest = match body.get("artifact_digest").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
@@ -68,7 +76,7 @@ pub async fn artifact_register(
         action: "artifact_register".to_string(),
         resource: "artifact".to_string(),
         context: json!({ "artifact_digest": artifact_digest.clone(), "artifact_type": artifact_type.clone() }),
-        envelope_digest: None,
+        envelope_digest: Some(meta.envelope_digest.clone()),
     };
 
     // default policy: allow
@@ -144,9 +152,15 @@ pub async fn artifact_register(
 #[post("/artifacts/use")]
 pub async fn artifact_use(
     store: web::Data<Mutex<FileEventStore>>,
+    req_http: HttpRequest,
     req: web::Json<serde_json::Value>,
 ) -> impl Responder {
     let body = req.into_inner();
+
+    let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+        Some(m) => m.clone(),
+        None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+    };
 
     let capability_id = match body.get("capability_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()) {
         Some(u) => u,
@@ -163,7 +177,7 @@ pub async fn artifact_use(
         action: "capability_consume".to_string(),
         resource: "artifact_use".to_string(),
         context: json!({ "capability_id": capability_id.to_string(), "artifact_digest": artifact_digest.clone() }),
-        envelope_digest: None,
+        envelope_digest: Some(meta.envelope_digest.clone()),
     };
 
     // Default allow policy for now
@@ -273,6 +287,7 @@ pub async fn artifact_use(
 #[post("/genesis")]
 pub async fn genesis(
     store: web::Data<Mutex<FileEventStore>>,
+    req_http: HttpRequest,
     req: web::Json<serde_json::Value>,
 ) -> impl Responder {
     // Only allow genesis if no GenesisCompleted event exists
@@ -370,12 +385,17 @@ pub async fn genesis(
     let operator_present = req.get("operator_present").and_then(|v| v.as_bool()).unwrap_or(false);
     let simulate_append_failure = req.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false);
 
+    let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+        Some(m) => m.clone(),
+        None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+    };
+
     let policy_input = PolicyInput {
         subject: actor_id.to_string(),
         action: "genesis".to_string(),
         resource: "system".to_string(),
         context: json!({ "is_initial_boot": is_initial_boot, "operator_present": operator_present, "simulate_append_failure": simulate_append_failure }),
-        envelope_digest: None,
+        envelope_digest: Some(meta.envelope_digest.clone()),
     };
 
     // If caller provided an explicit policy object, use it; otherwise, default to a conservative allow for genesis action.
@@ -518,9 +538,15 @@ pub async fn auth_challenge(
 #[post("/auth/login")]
 pub async fn auth_login(
     store: web::Data<Mutex<FileEventStore>>,
+    req_http: HttpRequest,
     req: web::Json<CanonicalEnvelopeAuthorizationRequest>,
 ) -> impl Responder {
     let envelope = req.into_inner();
+
+    let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+        Some(m) => m.clone(),
+        None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+    };
 
     // 1) Identity state and key lookup
     let identity_state = match load_identity_state_from_event_log("./sentinel_events.log") {
@@ -635,7 +661,7 @@ pub async fn auth_login(
         action: "auth_login".to_string(),
         resource: "session".to_string(),
         context: json!({ "challenge": challenge }),
-        envelope_digest: None,
+        envelope_digest: Some(meta.envelope_digest.clone()),
     };
     // Use a built-in allow policy for login (handlers may later use configured policies)
     let policy = Policy {
@@ -714,6 +740,7 @@ pub async fn auth_login(
     #[post("/policy/evaluate")]
     pub async fn policy_evaluate(
         store: web::Data<Mutex<FileEventStore>>,
+        req_http: HttpRequest,
         req: web::Json<serde_json::Value>,
     ) -> impl Responder {
         // 1) Parse input: require either `policy` (full object) or reject reference-only (no registry exists yet)
@@ -741,10 +768,16 @@ pub async fn auth_login(
             Ok(p) => p,
             Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
         };
-        let input: PolicyInput = match serde_json::from_value(input_value.unwrap().clone()) {
+        let mut input: PolicyInput = match serde_json::from_value(input_value.unwrap().clone()) {
             Ok(i) => i,
             Err(e) => return HttpResponse::BadRequest().body(format!("invalid input object: {e}")),
         };
+
+        let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+            Some(m) => m.clone(),
+            None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+        };
+        input.envelope_digest = Some(meta.envelope_digest.clone());
 
         // 2) Build PolicyEvaluated payload (pure)
         let now = Utc::now();
@@ -827,6 +860,7 @@ pub async fn auth_login(
     #[post("/privileged/action")]
     pub async fn privileged_action(
         store: web::Data<Mutex<FileEventStore>>,
+        req_http: HttpRequest,
         req: web::Json<serde_json::Value>,
     ) -> impl Responder {
         // Expect `policy` and `input` in body
@@ -843,10 +877,16 @@ pub async fn auth_login(
             Ok(p) => p,
             Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
         };
-        let input: PolicyInput = match serde_json::from_value(input_value.unwrap().clone()) {
+        let mut input: PolicyInput = match serde_json::from_value(input_value.unwrap().clone()) {
             Ok(i) => i,
             Err(e) => return HttpResponse::BadRequest().body(format!("invalid input object: {e}")),
         };
+
+        let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+            Some(m) => m.clone(),
+            None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+        };
+        input.envelope_digest = Some(meta.envelope_digest.clone());
 
         // 1) Evaluate (pure)
         let now = Utc::now();
@@ -950,9 +990,15 @@ pub async fn auth_login(
     #[post("/capabilities/issue")]
     pub async fn capability_issue(
         store: web::Data<Mutex<FileEventStore>>,
+        req_http: HttpRequest,
         req: web::Json<serde_json::Value>,
     ) -> impl Responder {
         let body = req.into_inner();
+
+        let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+            Some(m) => m.clone(),
+            None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+        };
 
         // Parse required fields
         let issuer = body.get("issuer").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "sentinel_service".to_string());
@@ -971,7 +1017,7 @@ pub async fn auth_login(
             action: "capability_issue".to_string(),
             resource: scope.clone(),
             context: json!({ "subject": subject.clone(), "scope": scope.clone(), "actions": actions.clone(), "ttl_minutes": ttl_minutes }),
-            envelope_digest: None,
+            envelope_digest: Some(meta.envelope_digest.clone()),
         };
 
         // Use provided policy or default allow for capability issuance
