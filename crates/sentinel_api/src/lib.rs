@@ -133,6 +133,58 @@ pub async fn genesis(
     };
 
     // Append events sequentially; fail-closed on any error
+    // release read guard before calling consent enforcement
+    drop(store_guard);
+
+    // 1) Build PolicyInput for genesis and determine policy to evaluate.
+    let is_initial_boot = req.get("is_initial_boot").and_then(|v| v.as_bool()).unwrap_or(true);
+    let operator_present = req.get("operator_present").and_then(|v| v.as_bool()).unwrap_or(false);
+    let simulate_append_failure = req.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let policy_input = PolicyInput {
+        subject: actor_id.to_string(),
+        action: "genesis".to_string(),
+        resource: "system".to_string(),
+        context: json!({ "is_initial_boot": is_initial_boot, "operator_present": operator_present, "simulate_append_failure": simulate_append_failure }),
+    };
+
+    // If caller provided an explicit policy object, use it; otherwise, default to a conservative allow for genesis action.
+    let policy = if let Some(pv) = req.get("policy") {
+        match serde_json::from_value::<Policy>(pv.clone()) {
+            Ok(p) => p,
+            Err(e) => return HttpResponse::BadRequest().body(format!("invalid policy object: {e}")),
+        }
+    } else {
+        Policy {
+            id: "genesis_allow".to_string(),
+            version: "v0".to_string(),
+            statements: vec![sentinel_policy::policy::Statement {
+                when: vec![sentinel_policy::policy::Condition { field: "action".to_string(), op: sentinel_policy::policy::Op::Eq, value: "genesis".to_string() }],
+                effect: sentinel_policy::policy::Effect::Allow,
+                rationale: "allow genesis".to_string(),
+            }],
+        }
+    };
+
+    // 2) Enforce consent (this appends PolicyEvaluated and Consent events durably). Fail-closed on any error.
+    let consent = match enforce_consent(&store, &policy, &policy_input).await {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            if e == "policy denied" {
+                return HttpResponse::Forbidden().body("policy denied");
+            } else {
+                return HttpResponse::InternalServerError().body(format!("consent enforcement failed: {e}"));
+            }
+        }
+    };
+
+    // 3) Optional test hook: simulate append failure to ensure no side effects recorded
+    if simulate_append_failure {
+        return HttpResponse::InternalServerError().body("simulated append failure");
+    }
+
+    // 4) After consent granted, append actor, key, and genesis events sequentially (fail-closed on append errors)
+    let mut store_guard = store.lock().unwrap();
     if let Err(e) = store_guard.append(actor_event) {
         return HttpResponse::InternalServerError().body(format!("actor event append failed: {e:?}"));
     }
@@ -141,6 +193,20 @@ pub async fn genesis(
     }
     if let Err(e) = store_guard.append(genesis_event) {
         return HttpResponse::InternalServerError().body(format!("genesis event append failed: {e:?}"));
+    }
+
+    // 5) Append EffectExecuted event (non-sync append is sufficient here)
+    let effect_event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: actor_id.to_string(),
+        kind: EventKind::EffectExecuted,
+        payload: json!({ "effect": "genesis", "policy_digest": consent.policy_digest, "input_digest": consent.input_digest }),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    if let Err(e) = store_guard.append(effect_event) {
+        return HttpResponse::InternalServerError().body(format!("effect event append failed: {e:?}"));
     }
 
     HttpResponse::Ok().json(json!({
