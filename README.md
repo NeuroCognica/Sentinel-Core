@@ -27,6 +27,7 @@ python health_check.py
 ```
 
 ## Laws (Summary)
+- First Law: Let there be no gate before the Sentinel. See [SENTINEL_CANON.md](SENTINEL_CANON.md).
 - Forever Law: All actions are logged before completion
 - Sentinel Law: No bypass of guard boundary
 - Never Boring: All faults are visible and queryable

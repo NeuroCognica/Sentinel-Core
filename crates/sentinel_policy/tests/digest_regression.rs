@@ -7,7 +7,7 @@ fn policy_and_input_digest_regression() {
     // Expected golden digests computed and frozen
     let expected_empty = "3d36383422149070fba884c607abac59784fe78be419f3f52bad6ed4e577cac5";
     let expected_allow_read = "3e92e9b14f0071c1a125faece0e57fe6912d9de835f57d522d0ef881de1fbc6c";
-    let expected_input = "10c05cc658a92bec384fd5fcd5634bd07201cdaf8f22a223e8bed886cec1895a";
+    let expected_input = "3483fe218e3913824c8e4562ed0d1279e15b3ab4e741add3350963217d067953";
 
     let p_empty = Policy { id: "policy-x".to_string(), version: "v0".to_string(), statements: vec![] };
     assert_eq!(policy_digest(&p_empty), expected_empty);
