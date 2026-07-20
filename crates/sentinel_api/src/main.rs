@@ -22,6 +22,7 @@ async fn main() -> std::io::Result<()> {
             .service(sentinel_api::genesis)
             .service(sentinel_api::auth_challenge)
             .service(sentinel_api::auth_login)
+            .service(sentinel_api::guard_authorize)
             .service(sentinel_api::policy_evaluate)
     })
     .bind(bind)?

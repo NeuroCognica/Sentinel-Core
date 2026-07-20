@@ -1,7 +1,17 @@
 use actix_web::{test, App};
+use sentinel_api::middleware::envelope_digest::{
+    compute_envelope_digest_hex, EnvelopeDigestMiddleware,
+};
+use sentinel_store::EventStore;
 use serde_json::json;
 use tempfile::TempDir;
-use sentinel_store::EventStore;
+use uuid::Uuid;
+
+fn envelope_for(path: &str, inner: serde_json::Value) -> serde_json::Value {
+    let nonce = Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", path, &nonce, &inner);
+    json!({ "nonce": nonce, "digest": digest, "body": inner })
+}
 
 #[actix_rt::test]
 async fn test_genesis_allow_path() {
@@ -12,15 +22,17 @@ async fn test_genesis_allow_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::genesis),
     )
     .await;
 
     let pk = hex::encode(vec![0u8; 32]);
+    let inner = json!({ "actor_id": "00000000-0000-0000-0000-000000000001", "key_id": "00000000-0000-0000-0000-000000000002", "public_key": pk });
     let req = test::TestRequest::post()
         .uri("/genesis")
-        .set_json(&json!({ "actor_id": "00000000-0000-0000-0000-000000000001", "key_id": "00000000-0000-0000-0000-000000000002", "public_key": pk }))
+        .set_json(&envelope_for("/genesis", inner))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -37,7 +49,9 @@ async fn test_genesis_allow_path() {
             sentinel_store::EventKind::ConsentGranted => found_consent = true,
             sentinel_store::EventKind::EffectExecuted => found_effect = true,
             sentinel_store::EventKind::Identity => {
-                if let Ok(ev) = serde_json::from_value::<sentinel_core::IdentityEvent>(rec.payload.clone()) {
+                if let Ok(ev) =
+                    serde_json::from_value::<sentinel_core::IdentityEvent>(rec.payload.clone())
+                {
                     if let sentinel_core::IdentityEvent::GenesisCompleted(_) = ev {
                         found_genesis = true;
                     }
@@ -61,6 +75,7 @@ async fn test_genesis_deny_path() {
 
     let app = test::init_service(
         App::new()
+            .wrap(EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::genesis),
     )
@@ -75,9 +90,10 @@ async fn test_genesis_deny_path() {
     });
 
     let pk = hex::encode(vec![1u8; 32]);
+    let inner = json!({ "actor_id": "00000000-0000-0000-0000-000000000010", "key_id": "00000000-0000-0000-0000-000000000011", "public_key": pk, "policy": policy });
     let req = test::TestRequest::post()
         .uri("/genesis")
-        .set_json(&json!({ "actor_id": "00000000-0000-0000-0000-000000000010", "key_id": "00000000-0000-0000-0000-000000000011", "public_key": pk, "policy": policy }))
+        .set_json(&envelope_for("/genesis", inner))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -94,7 +110,9 @@ async fn test_genesis_deny_path() {
             sentinel_store::EventKind::ConsentDenied => found_consent = true,
             sentinel_store::EventKind::EffectExecuted => found_effect = true,
             sentinel_store::EventKind::Identity => {
-                if let Ok(ev) = serde_json::from_value::<sentinel_core::IdentityEvent>(rec.payload.clone()) {
+                if let Ok(ev) =
+                    serde_json::from_value::<sentinel_core::IdentityEvent>(rec.payload.clone())
+                {
                     if let sentinel_core::IdentityEvent::GenesisCompleted(_) = ev {
                         found_genesis = true;
                     }
@@ -118,15 +136,17 @@ async fn test_genesis_append_failure_aborts() {
 
     let app = test::init_service(
         App::new()
+            .wrap(EnvelopeDigestMiddleware)
             .app_data(store_data.clone())
             .service(sentinel_api::genesis),
     )
     .await;
 
     let pk = hex::encode(vec![2u8; 32]);
+    let inner = json!({ "actor_id": "00000000-0000-0000-0000-000000000020", "key_id": "00000000-0000-0000-0000-000000000021", "public_key": pk, "simulate_append_failure": true });
     let req = test::TestRequest::post()
         .uri("/genesis")
-        .set_json(&json!({ "actor_id": "00000000-0000-0000-0000-000000000020", "key_id": "00000000-0000-0000-0000-000000000021", "public_key": pk, "simulate_append_failure": true }))
+        .set_json(&envelope_for("/genesis", inner))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_server_error());
@@ -134,10 +154,14 @@ async fn test_genesis_append_failure_aborts() {
     // Ensure no genesis identity or effect recorded
     let s = store_data.lock().unwrap();
     let events = s.iter().expect("iter");
-    assert!(!events.iter().any(|r| matches!(r.kind, sentinel_store::EventKind::EffectExecuted)));
+    assert!(!events
+        .iter()
+        .any(|r| matches!(r.kind, sentinel_store::EventKind::EffectExecuted)));
     assert!(!events.iter().any(|r| {
         if let sentinel_store::EventKind::Identity = r.kind {
-            if let Ok(ev) = serde_json::from_value::<sentinel_core::IdentityEvent>(r.payload.clone()) {
+            if let Ok(ev) =
+                serde_json::from_value::<sentinel_core::IdentityEvent>(r.payload.clone())
+            {
                 return matches!(ev, sentinel_core::IdentityEvent::GenesisCompleted(_));
             }
         }

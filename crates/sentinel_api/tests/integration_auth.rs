@@ -1,7 +1,14 @@
 use actix_web::{test, App};
-use tempfile::TempDir;
-use serde_json::json;
+use sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex;
 use sentinel_store::EventStore;
+use serde_json::json;
+use tempfile::TempDir;
+
+fn envelope_for(path: &str, inner: serde_json::Value) -> serde_json::Value {
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let digest = compute_envelope_digest_hex("POST", path, &nonce, &inner);
+    json!({ "nonce": nonce, "digest": digest, "body": inner })
+}
 
 #[actix_rt::test]
 async fn test_challenge_login_happy_path() {
@@ -34,13 +41,14 @@ async fn test_challenge_login_happy_path() {
     let key_id = uuid::Uuid::new_v4();
 
     // 2) POST /genesis
+    let inner = json!({
+        "actor_id": actor_id.to_string(),
+        "key_id": key_id.to_string(),
+        "public_key": pub_hex,
+    });
     let req = test::TestRequest::post()
         .uri("/genesis")
-        .set_json(&json!({
-            "actor_id": actor_id.to_string(),
-            "key_id": key_id.to_string(),
-            "public_key": pub_hex,
-        }))
+        .set_json(&envelope_for("/genesis", inner))
         .to_request();
     let resp = test::call_service(&app, req).await;
     if !resp.status().is_success() {
@@ -49,12 +57,13 @@ async fn test_challenge_login_happy_path() {
     }
 
     // 3) POST /auth/challenge
+    let inner = json!({
+        "actor_id": actor_id.to_string(),
+        "key_id": key_id.to_string(),
+    });
     let req = test::TestRequest::post()
         .uri("/auth/challenge")
-        .set_json(&json!({
-            "actor_id": actor_id.to_string(),
-            "key_id": key_id.to_string(),
-        }))
+        .set_json(&envelope_for("/auth/challenge", inner))
         .to_request();
     let resp = test::call_service(&app, req).await;
     if !resp.status().is_success() {
@@ -62,7 +71,11 @@ async fn test_challenge_login_happy_path() {
         panic!("challenge failed: {}", String::from_utf8_lossy(&body_bytes));
     }
     let body: serde_json::Value = test::read_body_json(resp).await;
-    let challenge = body.get("challenge").and_then(|v| v.as_str()).unwrap().to_string();
+    let challenge = body
+        .get("challenge")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
 
     // 4) Build canonical envelope and sign
     let payload = sentinel_core::AuthorizationRequest {
@@ -72,9 +85,10 @@ async fn test_challenge_login_happy_path() {
     };
     let nonce = uuid::Uuid::new_v4();
     let timestamp = chrono::Utc::now();
-    use sentinel_identity::{ActorId, KeyId};
     use ed25519_dalek::Signer;
-    let data = serde_json::to_vec(&(ActorId(actor_id), KeyId(key_id), nonce, timestamp, &payload)).unwrap();
+    use sentinel_identity::{ActorId, KeyId};
+    let data = serde_json::to_vec(&(ActorId(actor_id), KeyId(key_id), nonce, timestamp, &payload))
+        .unwrap();
     let sig = kp.sign(&data);
 
     let envelope = sentinel_core::CanonicalEnvelopeAuthorizationRequest {
@@ -88,13 +102,10 @@ async fn test_challenge_login_happy_path() {
 
     // Wrap the signed envelope in the nonce/digest/body envelope expected by the middleware.
     let inner = serde_json::to_value(&envelope).unwrap();
-    let nonce = uuid::Uuid::new_v4().to_string();
-    let digest = sentinel_api::middleware::envelope_digest::compute_envelope_digest_hex("POST", "/auth/login", &nonce, &inner);
-    let wrapper = serde_json::json!({ "nonce": nonce, "digest": digest, "body": inner });
 
     let req = test::TestRequest::post()
         .uri("/auth/login")
-        .set_json(&wrapper)
+        .set_json(&envelope_for("/auth/login", inner))
         .to_request();
     let resp = test::call_service(&app, req).await;
     if !resp.status().is_success() {

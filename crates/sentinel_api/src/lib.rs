@@ -9,6 +9,7 @@ use std::sync::Mutex;
 
 use sentinel_store::{EventKind, EventRecord, FileEventStore, EventStore};
 use sentinel_core::{IdentityEvent, ActorRegistered, KeyRegistered, GenesisCompleted, AuthChallengeIssued, AuthChallengeConsumed};
+use sentinel_core::{DeterministicSentinelGuard, GuardDecisionClass, GuardPolicy, SentinelGuard, SentinelGuardDecision, SentinelGuardRequest, SentinelGuardViolation};
 use hex;
 use sentinel_identity::{load_identity_state_from_event_log, KeyStatus};
 use chrono::Duration;
@@ -52,6 +53,172 @@ pub async fn health(store: web::Data<Mutex<FileEventStore>>) -> impl Responder {
         Ok(_) => HttpResponse::Ok().body("ok"),
         Err(e) => HttpResponse::InternalServerError().body(format!("event append failed: {e:?}")),
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/guard/authorize",
+    security(("EnvelopeAuth" = [])),
+    responses(
+        (status = 200, description = "Guard authorized the protected action"),
+        (status = 400, description = "Malformed guard request"),
+        (status = 403, description = "Guard denied the protected action"),
+        (status = 500, description = "Invariant breach")
+    )
+)]
+#[post("/guard/authorize")]
+pub async fn guard_authorize(
+    store: web::Data<Mutex<FileEventStore>>,
+    req_http: HttpRequest,
+    req: web::Json<serde_json::Value>,
+) -> impl Responder {
+    let body = req.into_inner();
+    let meta = match req_http.extensions().get::<middleware::envelope_digest::VerifiedEnvelopeMeta>() {
+        Some(m) => m.clone(),
+        None => return HttpResponse::BadRequest().body("missing verified envelope meta"),
+    };
+
+    let policy = match body.get("policy") {
+        Some(policy_value) => match serde_json::from_value::<GuardPolicy>(policy_value.clone()) {
+            Ok(policy) => policy,
+            Err(e) => {
+                return append_guard_parse_denial(
+                    store,
+                    "invalid guard policy",
+                    &format!("{e}"),
+                    Some(meta.envelope_digest),
+                ).await;
+            }
+        },
+        None => GuardPolicy::deny_all("missing-policy", "v0"),
+    };
+
+    let mut request = match body.get("request") {
+        Some(request_value) => match serde_json::from_value::<SentinelGuardRequest>(request_value.clone()) {
+            Ok(request) => request,
+            Err(e) => {
+                return append_guard_parse_denial(
+                    store,
+                    "invalid guard request",
+                    &format!("{e}"),
+                    Some(meta.envelope_digest),
+                ).await;
+            }
+        },
+        None => {
+            return append_guard_parse_denial(
+                store,
+                "missing guard request",
+                "body.request is required",
+                Some(meta.envelope_digest),
+            ).await;
+        }
+    };
+    request.envelope_digest = meta.envelope_digest.clone();
+
+    let guard = DeterministicSentinelGuard::new(policy);
+    let mut decision = guard.authorize(&request);
+    if request.nonce.to_string() != meta.nonce {
+        decision = force_lockdown_decision(
+            decision,
+            "guard request nonce does not match verified envelope nonce",
+            SentinelGuardViolation::new("nonce", "nonce mismatch with verified envelope"),
+        );
+    }
+
+    if body.get("simulate_append_failure").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return HttpResponse::InternalServerError().body("simulated guard decision append failure");
+    }
+
+    let decision = match append_guard_decision(store, &request.actor_id.to_string(), decision).await {
+        Ok(decision) => decision,
+        Err(resp) => return resp,
+    };
+
+    if decision.authorizes_effect() {
+        HttpResponse::Ok().json(decision)
+    } else if decision.class == GuardDecisionClass::Lockdown {
+        HttpResponse::BadRequest().json(decision)
+    } else {
+        HttpResponse::Forbidden().json(decision)
+    }
+}
+
+async fn append_guard_parse_denial(
+    store: web::Data<Mutex<FileEventStore>>,
+    reason: &str,
+    details: &str,
+    envelope_digest: Option<String>,
+) -> HttpResponse {
+    let payload = json!({
+        "class": "Lockdown",
+        "allowed": false,
+        "rationale": reason,
+        "details": details,
+        "envelope_digest": envelope_digest,
+    });
+    let event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: "unknown".to_string(),
+        kind: EventKind::SentinelGuardDecision,
+        payload,
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    let append_res = spawn_blocking(move || {
+        let mut s = store.lock().unwrap();
+        s.append_record_with_sync(event, true)
+    }).await;
+    match append_res {
+        Ok(Ok(_)) => HttpResponse::BadRequest().body(reason.to_string()),
+        Ok(Err(e)) => HttpResponse::InternalServerError().body(format!("guard parse denial append failed: {e:?}")),
+        Err(_) => HttpResponse::InternalServerError().body("guard parse denial append task failed"),
+    }
+}
+
+async fn append_guard_decision(
+    store: web::Data<Mutex<FileEventStore>>,
+    actor: &str,
+    decision: SentinelGuardDecision,
+) -> Result<SentinelGuardDecision, HttpResponse> {
+    let event = EventRecord {
+        event_id: Uuid::new_v4(),
+        timestamp_utc: Utc::now(),
+        actor: actor.to_string(),
+        kind: EventKind::SentinelGuardDecision,
+        payload: serde_json::to_value(&decision).expect("guard decision serialization"),
+        prev_hash: None,
+        hash: "UNHASHED".to_string(),
+    };
+    let append_res = spawn_blocking(move || {
+        let mut s = store.lock().unwrap();
+        s.append_record_with_sync(event, true)
+    }).await;
+    match append_res {
+        Ok(Ok(record)) => {
+            let mut response = decision;
+            response.ledger_event_hash = Some(record.hash);
+            Ok(response)
+        }
+        Ok(Err(e)) => Err(HttpResponse::InternalServerError().body(format!("guard decision append failed: {e:?}"))),
+        Err(_) => Err(HttpResponse::InternalServerError().body("guard decision append task failed")),
+    }
+}
+
+fn force_lockdown_decision(
+    mut decision: SentinelGuardDecision,
+    rationale: &str,
+    violation: SentinelGuardViolation,
+) -> SentinelGuardDecision {
+    decision.class = GuardDecisionClass::Lockdown;
+    decision.allowed = false;
+    decision.monitoring_required = false;
+    decision.rationale = rationale.to_string();
+    decision.matched_rule_id = None;
+    decision.violations.push(violation);
+    decision.ledger_event_hash = None;
+    decision
 }
 
 fn enforce_envelope_signature(envelope: &CanonicalEnvelopeAuthorizationRequest) -> Result<(), HttpResponse> {
