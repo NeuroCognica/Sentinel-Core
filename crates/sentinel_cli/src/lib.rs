@@ -644,6 +644,7 @@ fn should_skip_dir(name: &OsStr) -> bool {
     matches!(
         name.to_string_lossy().as_ref(),
         ".git"
+            | ".claude"
             | "target"
             | "node_modules"
             | ".venv"
@@ -652,6 +653,7 @@ fn should_skip_dir(name: &OsStr) -> bool {
             | "dist"
             | "build"
             | "__pycache__"
+            | "unsloth_compiled_cache"
     )
 }
 
