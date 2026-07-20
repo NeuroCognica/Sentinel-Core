@@ -199,7 +199,19 @@ fn help_text() -> String {
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    strip_windows_extended_prefix(&normalized)
+}
+
+fn strip_windows_extended_prefix(path: &Path) -> PathBuf {
+    let value = path.display().to_string();
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = value.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path.to_path_buf()
 }
 
 fn pass(id: &str, detail: impl Into<String>, evidence: Vec<String>) -> CertificationCheck {
