@@ -1,0 +1,82 @@
+{
+  "product": "sentinel-core",
+  "repository": "C:\\sentinel-core",
+  "strict": true,
+  "passed": true,
+  "checks": [
+    {
+      "id": "repo_exists",
+      "status": "PASS",
+      "detail": "repository path exists",
+      "evidence": [
+        "C:\\sentinel-core"
+      ]
+    },
+    {
+      "id": "git_repository",
+      "status": "PASS",
+      "detail": "path is inside a Git worktree",
+      "evidence": [
+        "C:\\sentinel-core"
+      ]
+    },
+    {
+      "id": "strict_git_clean",
+      "status": "PASS",
+      "detail": "working tree was clean before report write",
+      "evidence": []
+    },
+    {
+      "id": "master_plan_doc",
+      "status": "PASS",
+      "detail": "required Sentinel security document is present and contains release-critical markers",
+      "evidence": [
+        "C:\\sentinel-core\\docs\\security\\SENTINEL_IMPERVIOUS_PROTOCOL_MASTER_PLAN.md"
+      ]
+    },
+    {
+      "id": "adoption_status_doc",
+      "status": "PASS",
+      "detail": "required Sentinel security document is present and contains release-critical markers",
+      "evidence": [
+        "C:\\sentinel-core\\docs\\security\\SENTINEL_ADOPTION_STATUS.md"
+      ]
+    },
+    {
+      "id": "protected_actions_doc",
+      "status": "PASS",
+      "detail": "required Sentinel security document is present and contains release-critical markers",
+      "evidence": [
+        "C:\\sentinel-core\\docs\\security\\SENTINEL_PROTECTED_ACTIONS.md"
+      ]
+    },
+    {
+      "id": "protected_action_inventory",
+      "status": "PASS",
+      "detail": "inventory explicitly classifies every canonical Sentinel protected action",
+      "evidence": [
+        "40 actions covered in C:\\sentinel-core\\docs\\security\\SENTINEL_PROTECTED_ACTIONS.md"
+      ]
+    },
+    {
+      "id": "source_stub_markers",
+      "status": "PASS",
+      "detail": "no executable source stub markers found",
+      "evidence": []
+    },
+    {
+      "id": "sentinel_bypass_flags",
+      "status": "PASS",
+      "detail": "no Sentinel bypass or shadow-mode flags found in executable source",
+      "evidence": []
+    },
+    {
+      "id": "guard_fail_closed_self_test",
+      "status": "PASS",
+      "detail": "deny-all policy denies every protected action and unknown actions deny even under explicit policy",
+      "evidence": [
+        "40 protected actions tested"
+      ]
+    }
+  ]
+}
