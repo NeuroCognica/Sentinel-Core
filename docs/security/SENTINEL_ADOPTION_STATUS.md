@@ -7,10 +7,11 @@ Local plan copy: `docs/security/SENTINEL_IMPERVIOUS_PROTOCOL_MASTER_PLAN.md`
 Protected action inventory: `docs/security/SENTINEL_PROTECTED_ACTIONS.md`
 Certification report path: `docs/security/SENTINEL_CERTIFICATION_REPORT.md`
 Required release mode: `enforce`
+Certification readiness: candidate
 
 ## Current State
 
-Status: Implemented, not release-certified until `sentinel certify --strict` passes from a clean tree.
+Status: Certified in development by the current strict certification harness. Not release-signed.
 
 Implemented footholds:
 
@@ -34,4 +35,3 @@ Open execution work:
 ```powershell
 cargo run -p sentinel_cli --bin sentinel -- certify --repo C:\sentinel-core --product sentinel-core --strict --output-dir C:\sentinel-core\docs\security
 ```
-

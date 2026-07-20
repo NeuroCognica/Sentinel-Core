@@ -286,6 +286,7 @@ fn check_git_clean(repo: &Path) -> CertificationCheck {
 
 fn check_security_docs(repo: &Path, product: &str) -> Vec<CertificationCheck> {
     let security_dir = repo.join("docs").join("security");
+    let adoption_path = security_dir.join("SENTINEL_ADOPTION_STATUS.md");
     let required = [
         (
             "master_plan_doc",
@@ -297,7 +298,7 @@ fn check_security_docs(repo: &Path, product: &str) -> Vec<CertificationCheck> {
         ),
         (
             "adoption_status_doc",
-            security_dir.join("SENTINEL_ADOPTION_STATUS.md"),
+            adoption_path.clone(),
             vec![product, "enforce"],
         ),
         (
@@ -307,10 +308,12 @@ fn check_security_docs(repo: &Path, product: &str) -> Vec<CertificationCheck> {
         ),
     ];
 
-    required
+    let mut checks = required
         .into_iter()
         .map(|(id, path, required_strings)| check_doc_contains(id, &path, required_strings))
-        .collect()
+        .collect::<Vec<_>>();
+    checks.push(check_adoption_readiness(&adoption_path));
+    checks
 }
 
 fn check_doc_contains(id: &str, path: &Path, required_strings: Vec<&str>) -> CertificationCheck {
@@ -346,6 +349,39 @@ fn check_doc_contains(id: &str, path: &Path, required_strings: Vec<&str>) -> Cer
                 .into_iter()
                 .map(|needle| format!("missing `{needle}` in {}", path.display()))
                 .collect(),
+        )
+    }
+}
+
+fn check_adoption_readiness(path: &Path) -> CertificationCheck {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) => {
+            return fail(
+                "adoption_readiness",
+                "Sentinel adoption readiness marker is missing or unreadable",
+                vec![format!("{}: {err}", path.display())],
+            )
+        }
+    };
+    let lower = content.to_lowercase();
+    if lower.contains("certification readiness: candidate")
+        || lower.contains("certification readiness: certified")
+    {
+        pass(
+            "adoption_readiness",
+            "Sentinel adoption readiness is marked as candidate or certified",
+            vec![path.display().to_string()],
+        )
+    } else {
+        fail(
+            "adoption_readiness",
+            "Sentinel adoption readiness is not marked as candidate or certified",
+            vec![
+                "expected `Certification readiness: candidate` or `Certification readiness: certified`"
+                    .to_string(),
+                path.display().to_string(),
+            ],
         )
     }
 }
