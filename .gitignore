@@ -1,6 +1,18 @@
 /target/
 **/*.rs.bk
 Cargo.lock
+*.log
+*.pid
+*.key
+.env
+.env.*
+!.env.example
+!*.env.example
+tmp_*.json
+sentinel_events.jsonl
+sentinel_events.log
+sentinel_service.key
+nul
 
 # Python
 __pycache__/

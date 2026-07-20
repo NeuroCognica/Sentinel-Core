@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = [
     "crates/sentinel_core",
     "crates/sentinel_store",

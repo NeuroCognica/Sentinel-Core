@@ -101,6 +101,8 @@ pub fn certify(config: CertifyConfig) -> Result<(CertificationReport, Vec<PathBu
     }
     checks.extend(check_security_docs(&repo, &config.product));
     checks.push(check_protected_action_inventory(&repo));
+    checks.push(check_tracked_runtime_artifacts(&repo));
+    checks.push(check_tracked_secret_material(&repo));
     checks.push(check_source_patterns(
         &repo,
         "source_stub_markers",
@@ -192,8 +194,9 @@ fn help_text() -> String {
         "  sentinel certify --repo <path> --product <name> --strict [--output-dir <path>] [--no-write]",
         "",
         "Certification enforces Sentinel adoption docs, protected-action inventory coverage,",
-        "strict Git cleanliness, source stub scans, bypass-flag scans, and guard fail-closed",
-        "self-tests. Reports are deterministic so a clean tree can stay clean after reruns.",
+        "strict Git cleanliness, tracked secret/runtime-artifact scans, source stub scans,",
+        "bypass-flag scans, and guard fail-closed self-tests. Reports are deterministic",
+        "so a clean tree can stay clean after reruns.",
     ]
     .join("\n")
 }
@@ -427,6 +430,86 @@ fn check_protected_action_inventory(repo: &Path) -> CertificationCheck {
     }
 }
 
+fn check_tracked_runtime_artifacts(repo: &Path) -> CertificationCheck {
+    let files = match git_tracked_files(repo) {
+        Ok(files) => files,
+        Err(err) => {
+            return fail(
+                "tracked_runtime_artifacts",
+                "tracked file scan failed before completion",
+                vec![err],
+            )
+        }
+    };
+
+    let mut hits = files
+        .into_iter()
+        .filter(|path| tracked_path_is_runtime_artifact(path))
+        .map(|path| format!("tracked runtime/local artifact: {path}"))
+        .collect::<Vec<_>>();
+    hits.sort();
+
+    if hits.is_empty() {
+        pass(
+            "tracked_runtime_artifacts",
+            "no tracked env files, service keys, logs, build output, or runtime captures found",
+            Vec::new(),
+        )
+    } else {
+        fail(
+            "tracked_runtime_artifacts",
+            "tracked runtime/local artifacts must be removed from release source",
+            truncate_evidence(hits, 50),
+        )
+    }
+}
+
+fn check_tracked_secret_material(repo: &Path) -> CertificationCheck {
+    let files = match git_tracked_files(repo) {
+        Ok(files) => files,
+        Err(err) => {
+            return fail(
+                "tracked_secret_material",
+                "tracked file scan failed before completion",
+                vec![err],
+            )
+        }
+    };
+
+    let mut hits = Vec::new();
+    for relative in files {
+        let path = repo.join(&relative);
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line_no, line) in content.lines().enumerate() {
+            if let Some(rule) = secret_material_rule(line) {
+                hits.push(format!(
+                    "{}:{} matched {}",
+                    repo.join(&relative).display(),
+                    line_no + 1,
+                    rule
+                ));
+            }
+        }
+    }
+    hits.sort();
+
+    if hits.is_empty() {
+        pass(
+            "tracked_secret_material",
+            "no live-looking credentials or private-key material found in tracked files",
+            Vec::new(),
+        )
+    } else {
+        fail(
+            "tracked_secret_material",
+            "tracked files contain live-looking secret material",
+            truncate_evidence(hits, 50),
+        )
+    }
+}
+
 fn check_source_patterns(
     repo: &Path,
     id: &str,
@@ -616,6 +699,160 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
+fn git_tracked_files(repo: &Path) -> Result<Vec<String>, String> {
+    let output = git(repo, &["ls-files"])?;
+    let mut files = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.replace('\\', "/"))
+        .collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
+fn tracked_path_is_runtime_artifact(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    let lower = normalized.to_lowercase();
+    let leaf = lower.rsplit('/').next().unwrap_or(lower.as_str());
+
+    if leaf == ".env" {
+        return true;
+    }
+    if leaf.starts_with(".env.") && leaf != ".env.example" {
+        return true;
+    }
+    if leaf.ends_with(".pid")
+        || leaf.ends_with(".log")
+        || leaf.ends_with(".key")
+        || leaf == "nul"
+        || leaf == "sentinel_events.jsonl"
+        || leaf.starts_with("tmp_") && leaf.ends_with(".json")
+    {
+        return true;
+    }
+
+    lower.split('/').any(|component| {
+        component == "node_modules"
+            || component == "target"
+            || component == "dist"
+            || component == "build"
+            || component == "__pycache__"
+            || component == ".pytest_cache"
+            || component.starts_with("tmpclaude-")
+    })
+}
+
+fn secret_material_rule(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    if trimmed.contains(&private_key_marker("")) {
+        return Some("private-key-pem");
+    }
+    if trimmed.contains(&private_key_marker("RSA")) {
+        return Some("rsa-private-key-pem");
+    }
+    if trimmed.contains(&private_key_marker("OPENSSH")) {
+        return Some("openssh-private-key-pem");
+    }
+    if trimmed.contains(&private_key_marker("EC")) {
+        return Some("ec-private-key-pem");
+    }
+    if contains_token_prefix(trimmed, "GOCSPX-", 10) {
+        return Some("google-oauth-client-secret");
+    }
+    if contains_token_prefix(trimmed, "sk-proj-", 20) {
+        return Some("openai-project-key");
+    }
+    if contains_token_prefix(trimmed, "sk-ant-", 10) {
+        return Some("anthropic-api-key");
+    }
+    if contains_token_prefix(trimmed, "ghp_", 20)
+        || contains_token_prefix(trimmed, "github_pat_", 20)
+    {
+        return Some("github-token");
+    }
+    if contains_token_prefix(trimmed, "xoxb-", 20) || contains_token_prefix(trimmed, "xoxp-", 20) {
+        return Some("slack-token");
+    }
+
+    for key in [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_CLIENT_SECRET",
+        "GITHUB_TOKEN",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+    ] {
+        if assigned_live_secret_value(trimmed, key) {
+            return Some("live-secret-assignment");
+        }
+    }
+
+    None
+}
+
+fn private_key_marker(kind: &str) -> String {
+    if kind.is_empty() {
+        ["-----BEGIN ", "PRIVATE", " KEY-----"].concat()
+    } else {
+        format!("-----BEGIN {kind} {} KEY-----", "PRIVATE")
+    }
+}
+
+fn contains_token_prefix(line: &str, prefix: &str, min_suffix_len: usize) -> bool {
+    let mut remaining = line;
+    while let Some(index) = remaining.find(prefix) {
+        let token_tail = &remaining[index + prefix.len()..];
+        let suffix_len = token_tail
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+            .count();
+        if suffix_len >= min_suffix_len {
+            return true;
+        }
+        remaining = &token_tail[token_tail
+            .char_indices()
+            .nth(suffix_len)
+            .map(|(idx, _)| idx)
+            .unwrap_or(token_tail.len())..];
+    }
+    false
+}
+
+fn assigned_live_secret_value(line: &str, key: &str) -> bool {
+    let Some((_, value)) = line.split_once(&format!("{key}=")) else {
+        return false;
+    };
+    let value = value
+        .split('#')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'');
+    if value.is_empty() {
+        return false;
+    }
+    let lowered = value.to_lowercase();
+    !lowered.contains("replace")
+        && !lowered.contains("example")
+        && !lowered.contains("changeme")
+        && !lowered.contains("redacted")
+        && !lowered.contains("placeholder")
+        && !lowered.contains("<")
+        && !lowered.contains("your-")
+}
+
+fn truncate_evidence(mut evidence: Vec<String>, limit: usize) -> Vec<String> {
+    if evidence.len() <= limit {
+        return evidence;
+    }
+    let omitted = evidence.len() - limit;
+    evidence.truncate(limit);
+    evidence.push(format!("... {omitted} additional findings omitted"));
+    evidence
+}
+
 fn source_files(repo: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
     if let Ok(files) = git_tracked_source_files(repo) {
         if !files.is_empty() {
@@ -630,11 +867,8 @@ fn source_files(repo: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
 }
 
 fn git_tracked_source_files(repo: &Path) -> Result<Vec<PathBuf>, String> {
-    let output = git(repo, &["ls-files"])?;
-    let mut files = output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+    let mut files = git_tracked_files(repo)?
+        .into_iter()
         .map(|line| repo.join(line))
         .filter(|path| is_source_file(path))
         .collect::<Vec<_>>();
@@ -739,5 +973,43 @@ mod tests {
     fn guard_self_test_passes() {
         let check = check_guard_self_test();
         assert_eq!(check.status, PASS);
+    }
+
+    #[test]
+    fn runtime_artifact_detection_allows_env_examples_only() {
+        assert!(tracked_path_is_runtime_artifact("backend/.env"));
+        assert!(tracked_path_is_runtime_artifact("nginx/logs/nginx.pid"));
+        assert!(tracked_path_is_runtime_artifact(
+            "crates/sentinel_api/sentinel_service.key"
+        ));
+        assert!(tracked_path_is_runtime_artifact(
+            "frontend/node_modules/react/index.js"
+        ));
+        assert!(!tracked_path_is_runtime_artifact("backend/.env.example"));
+        assert!(!tracked_path_is_runtime_artifact(
+            "frontend/package-lock.json"
+        ));
+    }
+
+    #[test]
+    fn secret_material_detection_never_echoes_needed_value() {
+        let google_secret_key = ["GOOGLE", "CLIENT", "SECRET"].join("_");
+        assert_eq!(
+            secret_material_rule(&format!(
+                "{google_secret_key}=replace-with-google-client-secret"
+            )),
+            None
+        );
+        assert_eq!(
+            secret_material_rule(&format!(
+                "{google_secret_key}={}{}",
+                "GOCSPX-", "abcdefghijklmnopqrstuvwxyz"
+            )),
+            Some("google-oauth-client-secret")
+        );
+        assert_eq!(
+            secret_material_rule(&private_key_marker("")),
+            Some("private-key-pem")
+        );
     }
 }
