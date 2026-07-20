@@ -617,8 +617,27 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn source_files(repo: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    if let Ok(files) = git_tracked_source_files(repo) {
+        if !files.is_empty() {
+            return Ok(files);
+        }
+    }
+
     let mut files = Vec::new();
     collect_source_files(repo, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn git_tracked_source_files(repo: &Path) -> Result<Vec<PathBuf>, String> {
+    let output = git(repo, &["ls-files"])?;
+    let mut files = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| repo.join(line))
+        .filter(|path| is_source_file(path))
+        .collect::<Vec<_>>();
     files.sort();
     Ok(files)
 }
