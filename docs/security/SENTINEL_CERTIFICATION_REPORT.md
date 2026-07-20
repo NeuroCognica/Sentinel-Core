@@ -17,6 +17,7 @@ Result: `PASS`
 | `master_plan_doc` | `PASS` | required Sentinel security document is present and contains release-critical markers |
 | `adoption_status_doc` | `PASS` | required Sentinel security document is present and contains release-critical markers |
 | `protected_actions_doc` | `PASS` | required Sentinel security document is present and contains release-critical markers |
+| `adoption_readiness` | `PASS` | Sentinel adoption readiness is marked as candidate or certified |
 | `protected_action_inventory` | `PASS` | inventory explicitly classifies every canonical Sentinel protected action |
 | `source_stub_markers` | `PASS` | no executable source stub markers found |
 | `sentinel_bypass_flags` | `PASS` | no Sentinel bypass or shadow-mode flags found in executable source |
@@ -47,6 +48,10 @@ Result: `PASS`
 ### `protected_actions_doc`
 
 - `C:\sentinel-core\docs\security\SENTINEL_PROTECTED_ACTIONS.md`
+
+### `adoption_readiness`
+
+- `C:\sentinel-core\docs\security\SENTINEL_ADOPTION_STATUS.md`
 
 ### `protected_action_inventory`
 

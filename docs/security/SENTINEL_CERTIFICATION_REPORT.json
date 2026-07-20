@@ -51,6 +51,14 @@
       ]
     },
     {
+      "id": "adoption_readiness",
+      "status": "PASS",
+      "detail": "Sentinel adoption readiness is marked as candidate or certified",
+      "evidence": [
+        "C:\\sentinel-core\\docs\\security\\SENTINEL_ADOPTION_STATUS.md"
+      ]
+    },
+    {
       "id": "protected_action_inventory",
       "status": "PASS",
       "detail": "inventory explicitly classifies every canonical Sentinel protected action",
