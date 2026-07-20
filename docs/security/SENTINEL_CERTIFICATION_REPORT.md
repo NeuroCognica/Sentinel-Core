@@ -19,6 +19,8 @@ Result: `PASS`
 | `protected_actions_doc` | `PASS` | required Sentinel security document is present and contains release-critical markers |
 | `adoption_readiness` | `PASS` | Sentinel adoption readiness is marked as candidate or certified |
 | `protected_action_inventory` | `PASS` | inventory explicitly classifies every canonical Sentinel protected action |
+| `tracked_runtime_artifacts` | `PASS` | no tracked env files, service keys, logs, build output, or runtime captures found |
+| `tracked_secret_material` | `PASS` | no live-looking credentials or private-key material found in tracked files |
 | `source_stub_markers` | `PASS` | no executable source stub markers found |
 | `sentinel_bypass_flags` | `PASS` | no Sentinel bypass or shadow-mode flags found in executable source |
 | `guard_fail_closed_self_test` | `PASS` | deny-all policy denies every protected action and unknown actions deny even under explicit policy |
@@ -56,6 +58,14 @@ Result: `PASS`
 ### `protected_action_inventory`
 
 - `40 actions covered in C:\sentinel-core\docs\security\SENTINEL_PROTECTED_ACTIONS.md`
+
+### `tracked_runtime_artifacts`
+
+- No additional evidence.
+
+### `tracked_secret_material`
+
+- No additional evidence.
 
 ### `source_stub_markers`
 

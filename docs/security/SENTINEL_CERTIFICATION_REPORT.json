@@ -67,6 +67,18 @@
       ]
     },
     {
+      "id": "tracked_runtime_artifacts",
+      "status": "PASS",
+      "detail": "no tracked env files, service keys, logs, build output, or runtime captures found",
+      "evidence": []
+    },
+    {
+      "id": "tracked_secret_material",
+      "status": "PASS",
+      "detail": "no live-looking credentials or private-key material found in tracked files",
+      "evidence": []
+    },
+    {
       "id": "source_stub_markers",
       "status": "PASS",
       "detail": "no executable source stub markers found",
